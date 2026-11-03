@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Stream mapper: build a value stream map step by step</title>
+<title>Value Stream Mapper</title>
 <meta name="description" content="Build a value stream map step by step, find where work waits, and size the fixes before you commit to them.">
 <meta name="theme-color" content="#17324D">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317324D'/%3E%3Cpath d='M6 20h6l3-8 3 8h8' fill='none' stroke='%234CC9C0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -406,6 +406,8 @@ const KINDN={pdf:'PDF',docx:'Word',xlsx:'Spreadsheet',text:'Text',image:'Image, 
 const LIBS={
   mammoth:{src:['https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js'],ok:()=>window.mammoth},
   xlsx:{src:['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'],ok:()=>window.XLSX},
+  pptx:{src:['https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js'],ok:()=>window.PptxGenJS},
+  jspdf:{src:['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'],ok:()=>window.jspdf&&window.jspdf.jsPDF},
   pdf:{src:['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'],ok:()=>window.pdfjsLib}
 };
 const loading={};
@@ -915,10 +917,10 @@ function compositeSVG(){
   const svg=fixSvg(`<svg xmlns="http://www.w3.org/2000/svg" class="vsm" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}"><style>${EXPCSS}</style><rect width="100%" height="100%" fill="#fff"/><text x="24" y="28" style="font-weight:600;font-size:20px">${esc(S.scope.name||'Value stream map')}</text><text class="mut" x="24" y="52">${esc(sub)}</text>${body}</svg>`);
   return{svg,w:W,h:y};
 }
-function svgToPng(svg,w,h){
+function svgToPng(svg,w,h,scale){
   return new Promise((res,rej)=>{
     const img=new Image();
-    img.onload=()=>{const sc=2,c=document.createElement('canvas');c.width=w*sc;c.height=h*sc;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.scale(sc,sc);x.drawImage(img,0,0,w,h);c.toBlob(b=>b?res(b):rej(new Error('png')),'image/png')};
+    img.onload=()=>{const k=scale||2,c=document.createElement('canvas');c.width=w*k;c.height=h*k;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.scale(k,k);x.drawImage(img,0,0,w,h);c.toBlob(b=>b?res(b):rej(new Error('png')),'image/png')};
     img.onerror=()=>rej(new Error('img'));
     img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
   });
@@ -961,10 +963,180 @@ ${iRows?`<h2>Improvements</h2><table><thead><tr><th>Change</th><th>Step</th><th>
 ${S.docs.length?`<h2>Reference documents</h2><p>${S.docs.map(d=>esc(d.name)).join(', ')}</p>`:''}
 </body></html>`;
 }
+/* ---------- presentation and PDF export ---------- */
+const hasImps=()=>S.imps.some(i=>i.on);
+const blobToDataURL=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result));r.onerror=()=>rej(new Error('read'));r.readAsDataURL(b)});
+function singleSVG(m){
+  const x=mapSVG(m),W=+/ width="(\d+)"/.exec(x)[1];
+  const svg=fixSvg(`<svg xmlns="http://www.w3.org/2000/svg" class="vsm" width="${W}" height="300" viewBox="0 0 ${W} 300"><style>${EXPCSS}</style><rect width="100%" height="100%" fill="#fff"/>${x.replace(/^<svg[^>]*>/,'').replace(/<\/svg>$/,'')}</svg>`);
+  return{svg,w:W,h:300};
+}
+async function mapImages(){
+  const make=async m=>{const c=singleSVG(m),blob=await svgToPng(c.svg,c.w,c.h,3);return{data:await blobToDataURL(blob),w:c.w,h:c.h}};
+  return{cur:await make(model(false)),fut:hasImps()?await make(model(true)):null};
+}
+function kpRows(mc,mf,has){
+  const u=U(),sc=S.scope;
+  const it=[['Lead time',mc.lead,mf.lead,v=>fmt(v)+' '+u,-1],['Waiting',mc.wait,mf.wait,v=>fmt(v)+' '+u,-1],['Hands-on time',mc.touch,mf.touch,v=>fmt(v)+' '+u,-1],['Value-add share',mc.pce*100,mf.pce*100,v=>fmt(v)+'%',1],['Right first time, overall',mc.ry*100,mf.ry*100,v=>fmt(v)+'%',1],[cap(sc.input||'inputs')+' needed per '+(sc.output||'output'),mc.inputs,mf.inputs,v=>fmt(v),-1]];
+  return it.map(a=>{const d=a[2]-a[1],ch=has&&Math.abs(d)>1e-9?(d>0?'+':'-')+fmt(Math.abs(d))+(a[4]===1?' pts':''):'';return{l:a[0],c:a[3](a[1]),f:a[3](a[2]),ch,good:d*a[4]>0}});
+}
+function insights(mc,mf,has,cur,fut){
+  const u=U(),out=[];
+  out.push(`Waiting is ${fmt(pct(mc.wait,mc.lead))}% of lead time (${fmt(mc.wait)} of ${fmt(mc.lead)} ${u}).`);
+  const lw=cur.steps.reduce((a,x)=>x.w>a.w?x:a,{w:0});
+  if(lw.w>0)out.push(`Longest wait: ${lw.name||'Untitled step'}, ${fmt(lw.w)} ${u} before the step starts.`);
+  const lo=cur.steps.reduce((a,x)=>x.yield<a.yield?x:a,{yield:101});
+  if(lo.yield<95)out.push(`Lowest first-time-right: ${lo.name||'Untitled step'} at ${lo.yield}%.`);
+  if(has){
+    const rows=S.imps.filter(i=>i.on&&fut.sav[i.id]).map(i=>({i,d:fut.sav[i.id].days})).sort((a,b)=>b.d-a.d);
+    if(rows.length&&rows[0].d>0)out.push(`Biggest single saving: ${rows[0].i.title||'Untitled idea'}, ${fmt(rows[0].d)} ${u}.`);
+    out.push(`Together, the improvements cut lead time by ${fmt(mc.lead-mf.lead)} ${u} (${fmt(pct(mc.lead-mf.lead,mc.lead))}%).`);
+  }
+  return out;
+}
+function impRows(fut){
+  const u=U();
+  return S.imps.filter(i=>i.on&&fut.sav[i.id]).map(i=>({i,d:fut.sav[i.id].days})).sort((a,b)=>b.d-a.d).map(r=>{
+    const st=S.steps.find(x=>x.id===r.i.stepId);
+    return[r.i.title||'Untitled idea',st?st.name||'Untitled step':'',r.i.lever,r.i.effort,fmt(r.d)+' '+u,r.i.yieldGain>0?'+'+r.i.yieldGain+' pts first time right':''];
+  });
+}
+const SEGC={wait:'D99A0B',va:'0F8B8D',req:'5E74A0',waste:'D4483E'};
+const SEGN={wait:'Waiting',va:'Adds value',req:'Needed, no value',waste:'Waste'};
+function buildPptx(Pptx,imgs){
+  const u=U(),cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),has=hasImps(),sc=S.scope;
+  const F='Arial',NAVY='17324D',INK='12202E',MUT='566677',LINE='D2DBE3';
+  const name=sc.name||'Value stream map',date=new Date().toLocaleDateString();
+  const p=new Pptx();p.layout='LAYOUT_WIDE';p.title=name;
+  const ins=insights(mc,mf,has,cur,fut);
+  const newSlide=(t,sub)=>{
+    const sl=p.addSlide();
+    sl.addText(t,{x:0.6,y:0.35,w:12.1,h:0.7,fontFace:F,fontSize:28,bold:true,color:NAVY,valign:'middle'});
+    if(sub)sl.addText(sub,{x:0.6,y:1.0,w:12.1,h:0.4,fontFace:F,fontSize:14,color:MUT,valign:'top'});
+    sl.addText(name,{x:0.6,y:7.05,w:9,h:0.3,fontFace:F,fontSize:10,color:MUT});
+    sl.slideNumber={x:12.2,y:7.05,fontFace:F,fontSize:10,color:MUT};
+    return sl;
+  };
+  const th=t=>({text:t,options:{bold:true,color:'FFFFFF',fill:{color:NAVY},fontFace:F,fontSize:12,valign:'middle'}});
+  const td=(t,right,color)=>({text:String(t==null?'':t),options:{fontFace:F,fontSize:11,color:color||INK,align:right?'right':'left',valign:'middle'}});
+  // title
+  let sl=p.addSlide();sl.background={color:NAVY};
+  sl.addText(name,{x:0.8,y:1.7,w:11.7,h:1.5,fontFace:F,fontSize:40,bold:true,color:'FFFFFF',valign:'bottom'});
+  sl.addText([sc.account,'Prepared '+date].filter(Boolean).join(', '),{x:0.8,y:3.35,w:11.7,h:0.5,fontFace:F,fontSize:18,color:'9CC4F0',valign:'top'});
+  sl.addText(headline(mc,mf,has),{x:0.8,y:4.3,w:11.0,h:1.4,fontFace:F,fontSize:20,color:'FFFFFF',valign:'top'});
+  // key measures
+  sl=newSlide('Key measures',has?'Current state compared with the future state':'Current state');
+  const k=kpRows(mc,mf,has);
+  const head=[th('Measure'),th('Current')].concat(has?[th('Future'),th('Change')]:[]);
+  head.slice(1).forEach(h=>h.options.align='right');
+  const rows=[head].concat(k.map(r=>[td(r.l),td(r.c,true)].concat(has?[td(r.f,true),td(r.ch,true,r.ch?(r.good?'1A7440':'D4483E'):INK)]:[])));
+  sl.addTable(rows,{x:0.6,y:1.6,w:7.3,colW:has?[3.1,1.4,1.4,1.4]:[4.5,2.8],rowH:0.42,border:{type:'solid',pt:0.5,color:LINE}});
+  const labels=has?['Current','Future']:['Current'];
+  const ser=['wait','va','req','waste'].map(key=>({name:SEGN[key],labels,values:(has?[mc[key],mf[key]]:[mc[key]]).map(v=>Math.round(v*10)/10)}));
+  sl.addChart(p.charts.BAR,ser,{x:8.2,y:1.5,w:4.6,h:3.7,barDir:'col',barGrouping:'stacked',chartColors:['D99A0B','0F8B8D','5E74A0','D4483E'],showLegend:true,legendPos:'b',legendFontSize:10,legendFontFace:F,catAxisLabelFontFace:F,catAxisLabelFontSize:12,valAxisLabelFontSize:10,valAxisLabelFontFace:F,showValAxisTitle:true,valAxisTitle:'Time ('+u+')',valAxisTitleFontSize:10,showTitle:true,title:'Where the time goes',titleFontSize:13,titleFontFace:F,titleColor:INK});
+  sl.addText(ins.map(t=>({text:t,options:{bullet:true,breakLine:true}})),{x:0.6,y:5.4,w:12.1,h:1.6,fontFace:F,fontSize:12,color:INK,valign:'top',paraSpaceAfter:4});
+  // maps
+  const legend=(sl,y)=>{let x=0.6;[['va','Adds value'],['req','Needed, no value'],['waste','Waste'],['wait','Waiting']].forEach(a=>{sl.addShape(p.ShapeType.rect,{x,y:y+0.06,w:0.18,h:0.18,fill:{color:SEGC[a[0]]},line:{color:SEGC[a[0]],width:0}});sl.addText(a[1],{x:x+0.25,y,w:1.9,h:0.3,fontFace:F,fontSize:11,color:MUT,valign:'middle'});x+=2.2})};
+  const mapSlide=(label,img,mm,sub)=>{
+    const s2=newSlide(label,sub),maxW=12.3,maxH=4.3,kk=Math.min(maxW/img.w,maxH/img.h),w=img.w*kk,h=img.h*kk;
+    s2.addImage({data:img.data.replace(/^data:/,''),x:0.5+(maxW-w)/2,y:1.6,w,h});
+    legend(s2,1.6+h+0.3);
+  };
+  mapSlide('Current state',imgs.cur,mc,`Lead time ${fmt(mc.lead)} ${u}: ${fmt(mc.wait)} waiting, ${fmt(mc.touch)} hands-on`);
+  if(has&&imgs.fut)mapSlide('Future state',imgs.fut,mf,`Lead time ${fmt(mf.lead)} ${u}, down from ${fmt(mc.lead)} ${u}`);
+  // steps table
+  const cols=['Step','Owner','Value type','Hands-on','Wait before','Right first time','Wait cause'].concat(has?['Wait after']:[]);
+  const colW=has?[2.5,1.7,1.7,1.1,1.1,1.1,1.5,1.2]:[2.8,1.9,1.9,1.3,1.3,1.3,1.8];
+  const body=cur.steps.map((x,i)=>[td(x.name||'Untitled step'),td(x.owner),td(CLSS[x.cls]),td(fmt(x.touch)+' '+u,true),td(fmt(x.wait)+' '+u,true),td(x.yield+'%',true),td(x.cause)].concat(has?[td(fmt(fut.steps[i].w)+' '+u,true)]:[]));
+  const heads=cols.map((c,i)=>{const h=th(c);if(i>=3&&i!==6)h.options.align='right';return h});
+  for(let i=0,pg=0;i<body.length;i+=9,pg++){
+    const s3=newSlide(pg?'Steps and measures (continued)':'Steps and measures',`Times in ${UN[u]}`);
+    s3.addTable([heads].concat(body.slice(i,i+9)),{x:0.6,y:1.6,w:colW.reduce((a,b)=>a+b,0),colW,rowH:0.45,border:{type:'solid',pt:0.5,color:LINE}});
+  }
+  // improvements
+  const ir=impRows(fut);
+  if(has&&ir.length){
+    const ih=['Change','Step','Type','Effort','Time saved','Quality'].map((c,i)=>{const h=th(c);if(i===4)h.options.align='right';return h});
+    for(let i=0,pg=0;i<ir.length;i+=8,pg++){
+      const s4=newSlide(pg?'Improvements (continued)':'Improvements',`Ranked by time saved. Total: ${fmt(mc.lead-mf.lead)} ${u} off lead time`);
+      s4.addTable([ih].concat(ir.slice(i,i+8).map(r=>r.map((c,j)=>td(c,j===4)))),{x:0.6,y:1.6,w:12.1,colW:[4.6,2.2,1.7,1.0,1.4,1.2],rowH:0.5,border:{type:'solid',pt:0.5,color:LINE}});
+    }
+  }
+  if(S.docs.length){
+    const s5=newSlide('Reference documents','What this map was built from');
+    s5.addText(S.docs.map(d=>({text:d.name,options:{bullet:true,breakLine:true}})),{x:0.6,y:1.6,w:12.1,h:4.5,fontFace:F,fontSize:16,color:INK,valign:'top',paraSpaceAfter:6});
+  }
+  return p;
+}
+function buildPdf(JsPDF,imgs){
+  const u=U(),cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),has=hasImps(),sc=S.scope;
+  const t=x=>String(x==null?'':x).replace(/−/g,'-').replace(/→/g,'to').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/×/g,'x').replace(/…/g,'...').replace(/[^\x20-\x7E\xA0-\xFF\n]/g,'');
+  const doc=new JsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const W=297,H=210,M=14,NAVY=[23,50,77],INK=[18,32,46],MUT=[86,102,119];
+  const hex=h=>[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+  const name=t(sc.name||'Value stream map');
+  const ins=insights(mc,mf,has,cur,fut);
+  // cover
+  doc.setFillColor(...NAVY);doc.rect(0,0,W,H,'F');
+  doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(30);
+  const nl=doc.splitTextToSize(name,W-2*M-20);doc.text(nl,M+6,58);
+  let y=58+nl.length*12+4;
+  doc.setFont('helvetica','normal');doc.setFontSize(14);doc.setTextColor(156,196,240);
+  doc.text(t([sc.account,'Prepared '+new Date().toLocaleDateString()].filter(Boolean).join(', ')),M+6,y);
+  doc.setFontSize(15);doc.setTextColor(255,255,255);
+  doc.text(doc.splitTextToSize(t(headline(mc,mf,has)),W-2*M-30),M+6,y+16);
+  const heading=(h,sub)=>{doc.addPage();doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(20);doc.text(t(h),M,22);if(sub){doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(...MUT);doc.text(t(sub),M,29)}};
+  const legend=yy=>{let x=M;[['va','Adds value'],['req','Needed, no value'],['waste','Waste'],['wait','Waiting']].forEach(a=>{doc.setFillColor(...hex(SEGC[a[0]]));doc.rect(x,yy-3,3.5,3.5,'F');doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...MUT);doc.text(a[1],x+5,yy);x+=42})};
+  // key measures
+  heading('Key measures',has?'Current state compared with the future state':'Current state');
+  const k=kpRows(mc,mf,has);
+  doc.autoTable({startY:35,head:[['Measure','Current'].concat(has?['Future','Change']:[])],body:k.map(r=>[t(r.l),t(r.c)].concat(has?[t(r.f),t(r.ch)]:[])),theme:'grid',styles:{fontSize:10,textColor:INK,lineColor:[210,219,227],lineWidth:0.2},headStyles:{fillColor:NAVY,textColor:255},columnStyles:{1:{halign:'right'},2:{halign:'right'},3:{halign:'right'}},margin:{left:M,right:M},tableWidth:has?170:120});
+  y=doc.lastAutoTable.finalY+12;
+  doc.setFont('helvetica','bold');doc.setFontSize(12);doc.setTextColor(...INK);doc.text('Where the time goes',M,y);y+=6;
+  const bar=(label,m,mm)=>{
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...MUT);doc.text(label,M,y+5);
+    let x=M+18;const scale=180/(mc.lead||1);
+    ['wait','va','req','waste'].forEach(key=>{const v=mm[key];if(v<=0)return;const w=v*scale;doc.setFillColor(...hex(SEGC[key]));doc.rect(x,y,w,8,'F');if(w>9){doc.setTextColor(...(key==='wait'?INK:[255,255,255]));doc.setFontSize(8);doc.text(t(fmt(v)),x+w/2,y+5.3,{align:'center'})}x+=w});
+    doc.setTextColor(...MUT);doc.setFontSize(9);doc.text(t(fmt(mm.lead)+' '+u),x+3,y+5.3);y+=11;
+  };
+  bar('Current',cur,mc);if(has)bar('Future',fut,mf);
+  y+=3;
+  [['wait','Waiting'],['va','Adds value'],['req','Needed, no value'],['waste','Waste']].forEach((a,i)=>{doc.setFillColor(...hex(SEGC[a[0]]));doc.rect(M+i*42,y-3,3.5,3.5,'F');doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...MUT);doc.text(a[1],M+i*42+5,y)});
+  y+=10;
+  doc.setFont('helvetica','normal');doc.setFontSize(10.5);doc.setTextColor(...INK);
+  ins.forEach(x=>{const ls=doc.splitTextToSize('- '+t(x),W-2*M);doc.text(ls,M,y);y+=ls.length*4.8+1.5});
+  // maps
+  const mapPage=(label,img,mm,sub)=>{
+    heading(label,sub);
+    const maxW=W-2*M,maxH=H-80,kk=Math.min(maxW/img.w,maxH/img.h),w=img.w*kk,h=img.h*kk;
+    doc.addImage(img.data,'PNG',M+(maxW-w)/2,38,w,h);
+    legend(38+h+10);
+  };
+  mapPage('Current state',imgs.cur,mc,`Lead time ${fmt(mc.lead)} ${u}: ${fmt(mc.wait)} waiting, ${fmt(mc.touch)} hands-on`);
+  if(has&&imgs.fut)mapPage('Future state',imgs.fut,mf,`Lead time ${fmt(mf.lead)} ${u}, down from ${fmt(mc.lead)} ${u}`);
+  // steps
+  heading('Steps and measures',`Times in ${UN[u]}`);
+  doc.autoTable({startY:35,head:[['Step','Owner','Value type','Hands-on','Wait before','Right first time','Wait cause'].concat(has?['Wait after']:[])],body:cur.steps.map((x,i)=>[t(x.name||'Untitled step'),t(x.owner),CLSS[x.cls],fmt(x.touch)+' '+u,fmt(x.wait)+' '+u,x.yield+'%',t(x.cause)].concat(has?[fmt(fut.steps[i].w)+' '+u]:[])),theme:'grid',styles:{fontSize:9,textColor:INK,lineColor:[210,219,227],lineWidth:0.2},headStyles:{fillColor:NAVY,textColor:255},columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},7:{halign:'right'}},margin:{left:M,right:M,top:20}});
+  // improvements
+  const ir=impRows(fut);
+  if(has&&ir.length){
+    heading('Improvements',`Ranked by time saved. Total: ${fmt(mc.lead-mf.lead)} ${u} off lead time`);
+    doc.autoTable({startY:35,head:[['Change','Step','Type','Effort','Time saved','Quality']],body:ir.map(r=>r.map(t)),theme:'grid',styles:{fontSize:9,textColor:INK,lineColor:[210,219,227],lineWidth:0.2},headStyles:{fillColor:NAVY,textColor:255},columnStyles:{4:{halign:'right'}},margin:{left:M,right:M,top:20}});
+  }
+  if(S.docs.length){
+    heading('Reference documents','What this map was built from');
+    doc.setFont('helvetica','normal');doc.setFontSize(12);doc.setTextColor(...INK);
+    let yy=40;S.docs.forEach(d=>{doc.text('- '+t(d.name),M,yy);yy+=7});
+  }
+  const n=doc.getNumberOfPages();
+  for(let i=2;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...MUT);doc.text(name,M,H-8);doc.text(i+' / '+n,W-M,H-8,{align:'right'})}
+  return doc;
+}
+
 function dlHTML(){
   if(DL===false)return `<h3>Download</h3><p class="hint" style="margin:0">Downloads aren’t available in this view. Copy the summary at the bottom of the page instead.</p>`;
   const off=DL?'':'disabled';
-  return `<h3>Download your map</h3><div class="chips" style="margin-top:10px"><button type="button" class="btn primary" data-action="dl" data-v="report" ${off}>Report (.html)</button><button type="button" class="btn" data-action="dl" data-v="png" ${off}>Map image (.png)</button><button type="button" class="btn" data-action="dl" data-v="csv" ${off}>Data (.csv)</button></div><small>The report opens in any browser and prints cleanly to PDF. The CSV opens in Excel.</small><p class="hint" id="dlMsg" role="status"></p>`;
+  return `<h3>Download your map</h3><div class="chips" style="margin-top:10px"><button type="button" class="btn primary" data-action="dl" data-v="pptx" ${off}>Google Slides (.pptx)</button><button type="button" class="btn primary" data-action="dl" data-v="pdf" ${off}>PDF</button><button type="button" class="btn" data-action="dl" data-v="report" ${off}>Report (.html)</button><button type="button" class="btn" data-action="dl" data-v="png" ${off}>Map image (.png)</button><button type="button" class="btn" data-action="dl" data-v="csv" ${off}>Data (.csv)</button></div><small>Google Slides: upload the .pptx to Google Drive, then right-click it and choose Open with Google Slides. Text and tables stay editable. The maps and the chart arrive as pictures. The PDF has the same pages. The CSV opens in Excel.</small><p class="hint" id="dlMsg" role="status"></p>`;
 }
 function renderDl(){const c=$('#dlCard');if(c)c.innerHTML=dlHTML()}
 async function exportFile(kind){
@@ -975,8 +1147,14 @@ async function exportFile(kind){
     const base=slug(S.scope.name);
     if(kind==='report')await DL.save({filename:base+'-report.html',data:reportHTML()});
     else if(kind==='csv')await DL.save({filename:base+'-data.csv',data:csvText()});
+    else if(kind==='pptx'||kind==='pdf'){
+      say('Building the '+(kind==='pdf'?'PDF':'presentation')+'…');
+      const imgs=await mapImages();
+      if(kind==='pdf'){await lib('jspdf');const doc=buildPdf(window.jspdf.jsPDF,imgs);await DL.save({filename:base+'.pdf',data:doc.output('blob')})}
+      else{await lib('pptx');const pp=buildPptx(window.PptxGenJS,imgs);const blob=await pp.write({outputType:'blob'});await DL.save({filename:base+'.pptx',data:blob})}
+    }
     else{const c=compositeSVG(),blob=await svgToPng(c.svg,c.w,c.h);await DL.save({filename:base+'-map.png',data:blob})}
-    say('Saved.');
+    say(kind==='pptx'?'Saved. Upload it to Google Drive and open it with Google Slides.':'Saved.');
   }catch(e){
     const c=e&&e.code;
     say(c==='declined'?'Download cancelled.':c==='too_large'?'That file is too large to save.':'Couldn’t save this file. Try another format.');

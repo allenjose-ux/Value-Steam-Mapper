@@ -17,7 +17,9 @@ Use HTTPS. Copy-to-clipboard and some file features need a secure page.
 
 ## What works with no AI connection
 
-Everything except the Claude features: scope, step-by-step mapping, improvements with sliders, results, the report, image and CSV downloads, and document upload with text preview. Downloads use the browser's normal download.
+Everything except the Claude features: scope, step-by-step mapping, improvements with sliders, results, document upload with text preview, and every download (Google Slides .pptx, PDF, HTML report, PNG map and CSV). Downloads use the browser's normal download.
+
+**Google Slides:** the app can't create a Slides file directly, so it downloads a .pptx. Upload it to Google Drive, right-click it and choose Open with Google Slides. Text and tables stay editable. The maps and the chart arrive as pictures.
 
 ## Optional: Claude features
 
@@ -36,8 +38,9 @@ Notes:
 For a locked-down network, allow these or host copies yourself.
 
 - Google Fonts: fonts.googleapis.com and fonts.gstatic.com (falls back to system fonts if blocked).
-- cdnjs.cloudflare.com, loaded only when needed to read an uploaded file: pdf.js 3.11.174 (PDF), mammoth 1.6.0 (Word), SheetJS 0.18.5 (Excel).
-- Text, CSV and pasted text need none of these.
+- cdnjs.cloudflare.com, loaded only when needed: pdf.js 3.11.174 (reading PDFs), mammoth 1.6.0 (Word), SheetJS 0.18.5 (Excel), jsPDF 2.5.1 and jspdf-autotable 3.8.2 (PDF export).
+- cdn.jsdelivr.net, loaded only when you export to Google Slides: pptxgenjs 3.12.0.
+- Text, CSV and pasted text, and the HTML, PNG and CSV downloads, need none of these.
 
 ## Updating
 
@@ -45,6 +48,7 @@ Replace `index.html` with the new version. Saved maps carry over because they li
 
 ## Limits to know about
 
+- PDF export has Latin characters only. Names in other scripts are dropped from the PDF (the .pptx and HTML report keep them).
 - Data is per browser and per device. There are no accounts and no shared maps.
 - Reading PDFs relies on the file's text layer. Scans need to be uploaded as images (needs the Claude connection) or pasted as text.
 - Each uploaded document is trimmed to about 30,000 characters, and PDFs are read up to 40 pages.
