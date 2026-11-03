@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stream mapper: build a value stream map step by step</title>
+<meta name="description" content="Build a value stream map step by step, find where work waits, and size the fixes before you commit to them.">
+<meta name="theme-color" content="#17324D">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317324D'/%3E%3Cpath d='M6 20h6l3-8 3 8h8' fill='none' stroke='%234CC9C0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Schibsted+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EBF0F4;--surface:#FFFFFF;--ink:#12202E;--muted:#566677;--line:#D2DBE3;
+  --primary:#17324D;--onprimary:#FFFFFF;--focus:#1B6FD1;
+  --va:#0F8B8D;--va-bg:#D8F0EF;--req:#5E74A0;--req-bg:#E1E7F2;--waste:#D4483E;--waste-bg:#FBE0DD;
+  --wait:#D99A0B;--wait-bg:#FBEAC5;--imp:#2A9457;--imp-bg:#D8F1E1;--imp-text:#1A7440;
+  --ui:"Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --display:"Bricolage Grotesque","Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1923;--surface:#162331;--ink:#E5ECF2;--muted:#95A6B6;--line:#2A3B4C;
+    --primary:#9CC4F0;--onprimary:#0E1923;--focus:#6FA8F0;
+    --va:#4CC9C0;--va-bg:#12393B;--req:#8CA3CC;--req-bg:#25314A;--waste:#F0766C;--waste-bg:#4A2326;
+    --wait:#F0B93A;--wait-bg:#4A3A12;--imp:#4FCB82;--imp-bg:#173A29;--imp-text:#6FDB9B;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1923;--surface:#162331;--ink:#E5ECF2;--muted:#95A6B6;--line:#2A3B4C;
+  --primary:#9CC4F0;--onprimary:#0E1923;--focus:#6FA8F0;
+  --va:#4CC9C0;--va-bg:#12393B;--req:#8CA3CC;--req-bg:#25314A;--waste:#F0766C;--waste-bg:#4A2326;
+  --wait:#F0B93A;--wait-bg:#4A3A12;--imp:#4FCB82;--imp-bg:#173A29;--imp-text:#6FDB9B;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.5 var(--ui);-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
+.shell{max-width:1320px;margin:0 auto;padding:20px clamp(12px,3vw,32px) 56px}
+h1,h2,h3{font-family:var(--display);margin:0;font-weight:600;letter-spacing:-.01em;line-height:1.2}
+h1{font-size:clamp(26px,3.4vw,34px)}
+h2{font-size:22px;margin-bottom:6px}
+h3{font-size:16px;margin:18px 0 8px}
+p{margin:0 0 10px}
+.mut{color:var(--muted)}
+.lead{color:var(--muted);margin-bottom:16px}
+.hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+small{color:var(--muted);font-size:12.5px;display:block;margin-top:4px}
+.sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.tag{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.reset{display:flex;align-items:center;gap:8px;font-size:14px}
+.btn{font:500 14px var(--ui);border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--onprimary)}
+.btn.ghost{background:transparent}
+.btn.small{padding:6px 11px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.stages{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:20px;overflow-x:auto}
+.stg{font:500 14px var(--ui);background:transparent;border:0;border-bottom:3px solid transparent;color:var(--muted);padding:10px 12px 9px;cursor:pointer;white-space:nowrap;display:flex;gap:8px;align-items:center}
+.stg .n{width:22px;height:22px;border-radius:50%;border:1.5px solid currentColor;display:inline-grid;place-items:center;font-size:12px}
+.stg.done .n{background:var(--va);border-color:var(--va);color:#fff}
+.stg[aria-current="step"]{color:var(--ink);border-bottom-color:var(--primary)}
+.stg:disabled{opacity:.4;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:minmax(0,410px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel,.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px}
+.card{margin-bottom:16px}
+.card h3:first-child{margin-top:0}
+.f{display:block;margin:0 0 14px;border:0;padding:0;min-width:0}
+.f>span,.lbl,legend{display:block;font-weight:500;font-size:14px;margin-bottom:6px;padding:0}
+input,select,textarea{font:400 15px var(--ui);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+input[type=range]{padding:0;accent-color:var(--primary);height:24px}
+input[type=checkbox],input[type=radio]{width:auto}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:2fr 1.4fr 1fr;gap:10px}
+@media (max-width:520px){.row2,.row3{grid-template-columns:1fr}}
+.num{display:flex;align-items:center;gap:8px}
+.num em{font-style:normal;color:var(--muted);font-size:14px;min-width:28px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chip{font:400 13px var(--ui);padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.chip.on{background:var(--primary);color:var(--onprimary);border-color:var(--primary)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;color:var(--ink);padding:8px 13px;font:500 13px var(--ui);cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--primary);color:var(--onprimary)}
+.tpl{background:var(--bg);border-radius:10px;padding:12px 14px;margin-bottom:18px}
+.nav{display:flex;justify-content:space-between;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.srow{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--surface)}
+.srow.sel{border-color:var(--primary);box-shadow:inset 3px 0 0 var(--primary)}
+.sbtn{flex:1;min-width:0;text-align:left;border:0;background:transparent;color:var(--ink);padding:9px 10px;cursor:pointer;display:grid;grid-template-columns:12px minmax(0,1fr);column-gap:8px;align-items:center;font:inherit}
+.sname{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.smeta{grid-column:2;color:var(--muted);font-size:12.5px}
+.sact{display:flex;align-items:center;gap:2px;padding-right:6px}
+.sact button,.x{border:0;background:transparent;color:var(--muted);width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px}
+.sact button:hover,.x:hover{background:var(--bg);color:var(--ink)}
+.sact button:disabled{opacity:.3;cursor:default}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot.va{background:var(--va)}.dot.req{background:var(--req)}.dot.waste{background:var(--waste)}
+.editor{margin-top:16px;padding-top:4px;border-top:1px dashed var(--line)}
+.insight{background:var(--bg);border-radius:8px;padding:10px 12px;font-size:14px;margin-top:6px}
+.insight p:last-child{margin:0}
+.radio{display:flex;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer;align-items:flex-start}
+.radio input{margin-top:4px}
+.radio:has(input:checked){border-color:var(--primary);box-shadow:inset 3px 0 0 var(--primary)}
+.radio b{font-weight:500;display:block}
+.sug{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+.sug b{font-weight:500;display:block}
+.sug span{color:var(--muted);font-size:13px;display:block}
+.imp{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.imp.off{opacity:.55}
+.imphead{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.imphead .imptitle{font-weight:500}
+.chk input{width:18px;height:18px;margin:0}
+.sl{display:grid;grid-template-columns:132px minmax(0,1fr);gap:4px 10px;align-items:center;margin-bottom:6px;font-size:13.5px}
+.sl output{grid-column:2;color:var(--muted);font-size:12.5px}
+.sl input:disabled{opacity:.35}
+.saves{font-size:13.5px;font-weight:500;color:var(--imp-text);margin-top:4px}
+.imp.off .saves{color:var(--muted)}
+.total{background:var(--imp-bg);border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+.mapcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mapbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.legend i.tri{width:0;height:0;border-radius:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid var(--wait);vertical-align:0}
+.kstrip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.kstrip>div{padding:12px 16px;border-right:1px solid var(--line)}
+.kstrip>div:last-child{border-right:0}
+.kstrip span{display:block;color:var(--muted);font-size:12.5px}
+.kstrip b{font:600 22px var(--display);display:block;line-height:1.2}
+.good{color:var(--imp-text)}.bad{color:var(--waste)}
+@media (max-width:560px){.kstrip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.scroll{overflow-x:auto;padding:12px 16px 16px}
+.maphead{position:sticky;left:0;font:600 14px var(--display);margin:4px 0 6px}
+.maphead+svg{margin-bottom:14px}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.ghost{display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:16px}
+.ghost i{width:86px;height:52px;border:1.5px dashed var(--line);border-radius:6px}
+.ghost u{width:22px;height:0;border-top:1.5px dashed var(--line)}
+.vsm{display:block}
+.vsm text{fill:var(--ink);font:400 12px var(--ui);dominant-baseline:central}
+.vsm .t{font-weight:600;font-size:13px}
+.vsm .mut{fill:var(--muted)}
+.vsm .hd{stroke-width:1.5}
+.hd.va{fill:var(--va-bg);stroke:var(--va)}.hd.req{fill:var(--req-bg);stroke:var(--req)}.hd.waste{fill:var(--waste-bg);stroke:var(--waste)}
+.dbox,.nbox{fill:var(--surface);stroke:var(--line);stroke-width:1.5}
+.q{fill:var(--wait-bg);stroke:var(--wait);stroke-width:1.5}
+.q.hot{fill:var(--wait)}
+.q.none{fill:none;stroke-dasharray:3 3;opacity:.5}
+.elim{stroke-dasharray:4 3;opacity:.6}
+.vsm .strike{text-decoration:line-through}
+.vsm .gain{fill:var(--imp-text);font-weight:600}
+.pill{fill:var(--imp-bg);stroke:var(--imp);stroke-width:1}
+.lw{stroke:var(--wait);stroke-width:3;stroke-linecap:round}
+.lt{stroke-width:3;stroke-linecap:round}
+.lt.va{stroke:var(--va)}.lt.req{stroke:var(--req)}.lt.waste{stroke:var(--waste)}
+.lv{stroke:var(--line);stroke-width:1.5}
+.ar{stroke:var(--muted);stroke-width:1.5;fill:none}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi span{display:block;color:var(--muted);font-size:13px}
+.kpi b{font:600 26px var(--display);display:block;line-height:1.2;margin:2px 0}
+.kpi b i{font-style:normal;font-size:15px;color:var(--muted);font-weight:500}
+.kpi small{margin:0}
+.crow{display:grid;grid-template-columns:64px minmax(0,1fr) 84px;align-items:center;gap:10px;margin-bottom:8px}
+.ctrack{background:var(--bg);border-radius:6px;height:36px;overflow:hidden}
+.cbar{display:flex;height:100%}
+.cbar>div{display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:500;min-width:0;overflow:hidden;border-bottom:4px solid}
+.s-wait{background:var(--wait-bg);border-color:var(--wait)}.s-va{background:var(--va-bg);border-color:var(--va)}
+.s-req{background:var(--req-bg);border-color:var(--req)}.s-waste{background:var(--waste-bg);border-color:var(--waste)}
+.wf{display:grid;gap:6px}
+.wrow{display:grid;grid-template-columns:minmax(120px,230px) minmax(0,1fr) 92px;gap:12px;align-items:center}
+.wl b{font-weight:500;display:block;line-height:1.3}
+.wl span{color:var(--muted);font-size:12.5px}
+.wt{position:relative;height:22px;background:var(--bg);border-radius:4px}
+.wbar{position:absolute;top:0;height:100%;border-radius:4px}
+.wbar.base{background:var(--req)}.wbar.sav{background:var(--imp)}.wbar.fut{background:var(--va)}
+.wv{text-align:right;font-weight:500;font-size:14px}
+@media (max-width:640px){.wrow{grid-template-columns:minmax(0,1fr) 80px}.wrow .wt{grid-column:1/-1;order:3}}
+textarea{min-height:200px;font:400 13.5px/1.5 var(--ui);resize:vertical}
+.copyrow{display:flex;gap:10px;align-items:center;margin-top:10px}
+.refwrap{margin-bottom:16px}
+.refs{border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.refs>summary{cursor:pointer;padding:11px 14px;font-weight:500;display:flex;align-items:center;gap:8px;list-style:none}
+.refs>summary::-webkit-details-marker{display:none}
+.refs>summary::before{content:"▸";color:var(--muted)}
+.refs[open]>summary::before{content:"▾"}
+.count{background:var(--bg);border-radius:999px;font-size:12px;padding:1px 8px;color:var(--muted);font-weight:400}
+.refbody{padding:0 14px 14px}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;margin-bottom:10px}
+.drop.over{border-color:var(--primary);background:var(--bg)}
+.drop p{margin:0 0 8px;color:var(--muted)}
+.drop small{margin-top:8px}
+.paste{margin-bottom:10px;font-size:14px}
+.paste summary{cursor:pointer;color:var(--muted);margin-bottom:6px}
+.paste textarea{min-height:90px;margin-bottom:6px}
+.doc{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:14px}
+.dtop{display:flex;align-items:center;gap:8px}
+.dname{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dmeta{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.doc details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:4px}
+.doc pre{white-space:pre-wrap;word-break:break-word;font:400 12.5px/1.5 var(--ui);background:var(--bg);border-radius:6px;padding:8px;max-height:160px;overflow:auto;margin:6px 0 0}
+.draft{background:var(--bg);border-radius:10px;padding:12px 14px;margin:10px 0}
+.draft ol{margin:6px 0;padding-left:20px}
+.aibar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px}
+.aimsg{font-size:13.5px;color:var(--muted)}
+.aimsg.err{color:var(--waste)}
+.aimsg:empty{display:none}
+.ask{margin-top:12px}
+.askout{white-space:pre-wrap;font-size:14px;margin-top:6px}
+.src{background:var(--bg);border-radius:8px;padding:8px 12px;font-size:13.5px;margin:0 0 14px}
+.src b{font-weight:500;display:block}
+.src p{margin:2px 0 0;color:var(--muted)}
+.warn,small.warn{color:var(--waste)}
+.badge{font-style:normal;font-size:11.5px;font-weight:500;background:var(--va-bg);color:var(--ink);border:1px solid var(--va);border-radius:999px;padding:0 7px;margin-right:4px;display:inline-block}
+.srcq{font-style:italic}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--primary);border-radius:50%;margin-right:6px;vertical-align:-2px}
+@media (prefers-reduced-motion:no-preference){.spin{animation:sp .8s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}.chip,.btn,.seg button{transition:background .12s,border-color .12s}}
+</style>
+</head>
+<body>
+<div class="shell" id="app"></div>
+<noscript><p style="padding:24px;font-family:sans-serif">Stream mapper needs JavaScript. Turn it on in your browser and reload.</p></noscript>
+<script>
+(function(){
+'use strict';
+const KEY='stream-mapper-v1';
+const STANDALONE=!(window.claude&&window.claude.use);
+const CFG_KEY='stream-mapper-ai';
+const DEFEND='https://api.anthropic.com',DEFMODEL='claude-sonnet-5-5';
+const $=(s,r)=>(r||document).querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9);
+const num=v=>{const n=parseFloat(v);return isFinite(n)&&n>=0?n:0};
+const fmt=n=>{if(!isFinite(n))return '—';const d=Math.abs(n)<1?100:10;return String(Math.round(n*d)/d)};
+const clip=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s};
+const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+const pct=(a,b)=>b?a/b*100:0;
+
+const CAUSES=['Batching','Approval','Handoff','Capacity','System or tool','Scheduling','Other'];
+const LOSSES=['Missing information','Quality error','Rejected or declined','Drop-out or no-show','Other'];
+const LEVERS=['Eliminate','Automate','Reduce batching','Standardize','Redesign handoff','Add capacity','Other'];
+const EFFORTS=['Low','Medium','High'];
+const CLSN={va:'Yes, it adds value',req:'Needed, but adds no value',waste:'No, it’s waste'};
+const CLSD={va:'The customer would pay for it, or notice if it were missing.',req:'Compliance, security, or a handoff the work depends on.',waste:'Rework, waiting for approval, duplicate checks.'};
+const SUG={
+  'Batching':{title:'Move from batches to continuous flow',lever:'Reduce batching',waitCut:60,effort:'Medium'},
+  'Approval':{title:'Delegate approval and set a response SLA',lever:'Redesign handoff',waitCut:60,effort:'Low'},
+  'Handoff':{title:'Give the work one owner end to end',lever:'Redesign handoff',waitCut:50,effort:'Medium'},
+  'Capacity':{title:'Rebalance capacity with a flex pool',lever:'Add capacity',waitCut:40,effort:'Medium'},
+  'System or tool':{title:'Integrate or automate the system step',lever:'Automate',waitCut:30,touchCut:40,effort:'High'},
+  'Scheduling':{title:'Pre-book slots or let people self-schedule',lever:'Standardize',waitCut:60,effort:'Low'},
+  'Other':{title:'Agree a time limit and escalate when it’s breached',lever:'Standardize',waitCut:30,effort:'Low'}
+};
+
+const fresh=()=>({stage:1,view:'current',sel:null,reset:false,scope:{name:'',account:'',unit:'d',input:'',output:'',demand:'',per:'month'},steps:[],imps:[],docs:[]});
+function load(){try{const r=localStorage.getItem(KEY);if(!r)return null;const o=JSON.parse(r);if(!o||!Array.isArray(o.steps)||!Array.isArray(o.imps))return null;const f=fresh();return Object.assign(f,o,{scope:Object.assign(f.scope,o.scope||{}),reset:false,docs:Array.isArray(o.docs)?o.docs:[]});}catch(e){return null}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+let S=load()||fresh();
+const app=$('#app');
+
+const newStep=o=>Object.assign({id:uid(),name:'',owner:'',touch:0,wait:0,yield:100,cls:'req',cause:'',loss:'',note:'',src:'',missing:[]},o||{});
+const newImp=o=>Object.assign({id:uid(),stepId:null,title:'',lever:'Other',waitCut:0,touchCut:0,yieldGain:0,effort:'Low',on:true},o||{});
+
+const TPL={
+  hiring:{scope:{name:'Recruitment to training',account:'Voice account',unit:'d',input:'applicants',output:'agent',demand:'40',per:'month'},
+    steps:[
+      {name:'Sourcing',owner:'TA team',touch:.5,wait:0,yield:30,cls:'req',loss:'Missing information'},
+      {name:'Interviews',owner:'TA and Ops',touch:1,wait:3,yield:50,cls:'req',cause:'Scheduling',loss:'Rejected or declined'},
+      {name:'Offer and checks',owner:'TA and HR',touch:2,wait:4,yield:75,cls:'req',cause:'Approval',loss:'Drop-out or no-show'},
+      {name:'Onboarding',owner:'HR and IT',touch:1,wait:10,yield:95,cls:'req',cause:'Other',note:'Notice period and background clearance'},
+      {name:'Training and nesting',owner:'Trainers',touch:20,wait:6,yield:80,cls:'va',cause:'Batching',loss:'Drop-out or no-show'}],
+    imps:[[1,'Self-scheduling with pre-booked panels','Standardize',67,0,0,'Low'],[2,'Delegate offer approval with a 24 h SLA','Redesign handoff',50,0,0,'Low'],[3,'Pre-clear documents during the notice period','Redesign handoff',40,0,0,'Medium'],[3,'Automate account provisioning','Automate',0,50,0,'Medium'],[4,'Rolling class starts','Reduce batching',67,0,0,'Medium'],[4,'Week-one attrition check-ins','Standardize',0,0,5,'Low']]},
+  refund:{scope:{name:'Refund request handling',account:'Support account',unit:'h',input:'requests',output:'refund',demand:'2000',per:'week'},
+    steps:[
+      {name:'Intake and triage',owner:'Tier 1',touch:.1,wait:2,yield:90,cls:'req',cause:'Capacity',loss:'Missing information'},
+      {name:'Verify identity',owner:'Tier 1',touch:.2,wait:.5,yield:95,cls:'req',cause:'Handoff'},
+      {name:'Investigate order',owner:'Tier 1',touch:.5,wait:6,yield:80,cls:'va',cause:'System or tool',loss:'Quality error'},
+      {name:'Approval',owner:'Team leader',touch:.1,wait:12,yield:92,cls:'waste',cause:'Approval'},
+      {name:'Issue refund',owner:'Finance ops',touch:.2,wait:8,yield:98,cls:'va',cause:'Batching'},
+      {name:'Notify customer',owner:'Tier 1',touch:.1,wait:1,yield:99,cls:'va',cause:'Handoff'}],
+    imps:[[3,'Raise the refund authority limit','Eliminate',80,0,0,'Low'],[4,'Run refunds hourly, not daily','Reduce batching',75,0,0,'Medium'],[2,'Order lookup integration','Automate',50,60,0,'High'],[0,'Auto-route by request type','Automate',50,0,0,'Medium']]}
+};
+function loadTpl(k){
+  const keepDocs=S.docs;
+  if(k==='blank'){S=fresh();}
+  else{const t=TPL[k];S=fresh();S.scope=Object.assign(S.scope,t.scope);S.steps=t.steps.map(newStep);
+    S.imps=t.imps.map(a=>newImp({stepId:S.steps[a[0]].id,title:a[1],lever:a[2],waitCut:a[3],touchCut:a[4],yieldGain:a[5],effort:a[6]}));S.sel=S.steps[0].id;}
+  S.docs=keepDocs;DRAFT=null;AISUGS=[];LOOK=null;save();renderApp();
+}
+
+const U=()=>S.scope.unit;
+const sel=()=>S.steps.find(s=>s.id===S.sel)||null;
+function ensureSel(){if(!sel())S.sel=S.steps[0]?S.steps[0].id:null}
+
+function model(future){
+  const steps=S.steps;
+  if(!future)return{future:false,sav:{},steps:steps.map(s=>Object.assign({},s,{t:s.touch,w:s.wait,y:s.yield,elim:false}))};
+  const rem={},sav={};
+  steps.forEach(s=>{rem[s.id]={t:s.touch,w:s.wait,y:s.yield}});
+  S.imps.forEach(i=>{
+    if(!i.on||!rem[i.stepId])return;
+    const st=steps.find(s=>s.id===i.stepId),r=rem[i.stepId];
+    const dt=Math.min(st.touch*i.touchCut/100,r.t),dw=Math.min(st.wait*i.waitCut/100,r.w);
+    r.t-=dt;r.w-=dw;r.y=Math.min(100,r.y+i.yieldGain);
+    sav[i.id]={dt,dw,days:dt+dw};
+  });
+  return{future:true,sav,steps:steps.map(s=>{const r=rem[s.id];const elim=(s.touch+s.wait)>0&&r.t<=1e-9&&r.w<=1e-9;
+    return Object.assign({},s,{t:r.t,w:r.w,y:elim?100:r.y,elim});})};
+}
+function metrics(m){
+  let lead=0,touch=0,wait=0,va=0,req=0,waste=0,ry=1;
+  m.steps.forEach(s=>{lead+=s.t+s.w;touch+=s.t;wait+=s.w;if(s.cls==='va')va+=s.t;else if(s.cls==='req')req+=s.t;else waste+=s.t;ry*=s.y/100});
+  return{lead,touch,wait,va,req,waste,pce:lead>0?va/lead:0,ry,inputs:ry>0?1/ry:Infinity};
+}
+
+function wrap2(s,max){
+  s=String(s||'Untitled step');max=max||17;
+  if(s.length<=max)return[s];
+  let cut=s.lastIndexOf(' ',max);if(cut<6)cut=max;
+  let a=s.slice(0,cut).trim(),b=s.slice(cut).trim();
+  if(b.length>max)b=b.slice(0,max-1)+'…';
+  return[a,b];
+}
+
+function mapSVG(m){
+  const st=m.steps,n=st.length,u=U(),SW=136,G=48,BW=84,X0=24,H=300;
+  const SX=i=>X0+BW+G+i*(SW+G),endX=SX(n),W=endX+BW+X0;
+  const me=metrics(m),maxW=Math.max.apply(null,[0].concat(st.map(s=>s.w)));
+  const mk='ar'+(m.future?'f':'c');
+  const sc=S.scope;
+  let o=`<svg class="vsm" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Value stream map, ${m.future?'future':'current'} state. Lead time ${fmt(me.lead)} ${u}."><defs><marker id="${mk}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+  o+=`<rect class="nbox" x="${X0}" y="76" width="${BW}" height="114" rx="4"/><text class="t" x="${X0+10}" y="98">Demand</text><text class="ts" x="${X0+10}" y="118">${esc(clip(sc.demand||'Not set',11))}</text><text class="mut" x="${X0+10}" y="136">${esc(clip(sc.output||'units',11))}</text><text class="mut" x="${X0+10}" y="154">per ${esc(sc.per)}</text>`;
+  o+=`<rect class="nbox" x="${endX}" y="76" width="${BW}" height="114" rx="4"/><text class="t" x="${endX+10}" y="98">Output</text><text class="ts" x="${endX+10}" y="118">1 ${esc(clip(sc.output||'unit',9))}</text><text class="mut" x="${endX+10}" y="136">needs ${isFinite(me.inputs)?fmt(me.inputs):'—'}</text><text class="mut" x="${endX+10}" y="154">${esc(clip(sc.input||'inputs',11))}</text>`;
+  for(let i=0;i<=n;i++){
+    const x1=i===0?X0+BW+3:SX(i-1)+SW+3,x2=(i===n?endX:SX(i))-3;
+    o+=`<line class="ar" x1="${x1}" y1="100" x2="${x2}" y2="100" marker-end="url(#${mk})"/>`;
+  }
+  const yW=232,yT=256;
+  o+=`<text class="mut" x="${X0}" y="${yW}">Wait</text><text class="mut" x="${X0}" y="${yT}">Touch</text>`;
+  st.forEach((s,i)=>{
+    const x=SX(i),cx=x+SW/2,gx=x-G/2,lines=wrap2(s.name),two=lines.length>1;
+    const dt=m.future&&s.t<s.touch-1e-9,dw=m.future&&s.w<s.wait-1e-9,dy=m.future&&s.y>s.yield+1e-9;
+    const saved=s.touch+s.wait-(s.t+s.w);
+    const hot=!m.future&&s.w>0&&s.w===maxW;
+    o+=`<polygon class="q${s.w>0?'':' none'}${hot?' hot':''}" points="${gx},32 ${gx-11},54 ${gx+11},54"/>`;
+    if(s.w>0)o+=`<text class="ts${dw?' gain':''}" x="${gx}" y="70" text-anchor="middle">${fmt(s.w)} ${u}</text>`;
+    o+=`<rect class="hd ${s.cls}${s.elim?' elim':''}" x="${x}" y="76" width="${SW}" height="48" rx="4"/>`;
+    o+=lines.map((l,k)=>`<text class="t${s.elim?' strike':''}" x="${cx}" y="${two?93+k*16:100}" text-anchor="middle">${esc(l)}</text>`).join('');
+    o+=`<rect class="dbox${s.elim?' elim':''}" x="${x}" y="124" width="${SW}" height="66" rx="4"/>`;
+    o+=`<text class="ts${dt?' gain':''}" x="${x+10}" y="141">Touch ${fmt(s.t)} ${u}</text><text class="ts${dy?' gain':''}" x="${x+10}" y="159">Yield ${fmt(s.y)}%</text><text class="mut" x="${x+10}" y="177">${esc(clip(s.owner||'No owner yet',18))}</text>`;
+    if(m.future&&(s.elim||saved>1e-9)){
+      o+=`<rect class="pill" x="${cx-34}" y="48" width="68" height="20" rx="10"/><text class="gain" x="${cx}" y="58" text-anchor="middle">${s.elim?'Eliminated':'−'+fmt(saved)+' '+u}</text>`;
+    }
+    const a=x-G,c=x+SW;
+    o+=`<line class="lw" x1="${a}" y1="${yW}" x2="${x}" y2="${yW}"/><line class="lt ${s.cls}" x1="${x}" y1="${yT}" x2="${c}" y2="${yT}"/><line class="lv" x1="${a}" y1="${yT}" x2="${a}" y2="${yW}"/><line class="lv" x1="${x}" y1="${yW}" x2="${x}" y2="${yT}"/>`;
+    if(s.w>0)o+=`<text class="ts" x="${(a+x)/2}" y="${yW-14}" text-anchor="middle">${fmt(s.w)}</text>`;
+    o+=`<text class="ts" x="${cx}" y="${yT+18}" text-anchor="middle">${fmt(s.t)}</text>`;
+  });
+  o+=`<text class="ts" x="${endX}" y="${yW}">Wait ${fmt(me.wait)} ${u}</text><text class="ts" x="${endX}" y="${yT}">Touch ${fmt(me.touch)} ${u}</text><text class="t" x="${endX}" y="282">Lead ${fmt(me.lead)} ${u}</text></svg>`;
+  return o;
+}
+
+function legendHTML(){
+  return `<div class="legend"><span><i style="background:var(--va)"></i>Adds value</span><span><i style="background:var(--req)"></i>Needed, no value</span><span><i style="background:var(--waste)"></i>Waste</span><span><i class="tri"></i>Waiting</span><span><i style="background:var(--imp)"></i>Improved</span></div>`;
+}
+function kstrip(mc,mf,showF){
+  const u=U();
+  const it=[['Lead time',mc.lead,mf.lead,v=>`${fmt(v)} ${u}`,-1],['Waiting',mc.wait,mf.wait,v=>`${fmt(v)} ${u}`,-1],['Hands-on',mc.touch,mf.touch,v=>`${fmt(v)} ${u}`,-1],['Value-add share',mc.pce*100,mf.pce*100,v=>`${fmt(v)}%`,1]];
+  return `<div class="kstrip">${it.map(a=>{const c=a[1],f=a[2],fm=a[3],d=a[4];let dl='';
+    if(showF&&Math.abs(f-c)>1e-9)dl=`<small class="${(f-c)*d>0?'good':'bad'}">from ${fm(c)}</small>`;
+    return `<div><span>${a[0]}</span><b>${fm(showF?f:c)}</b>${dl}</div>`}).join('')}</div>`;
+}
+function mapPaneHTML(){
+  const segs=[['current','Current state'],['future','Future state'],['compare','Compare']];
+  let h=`<div class="mapcard"><div class="mapbar"><div class="seg" role="group" aria-label="Map view">${segs.map(a=>`<button type="button" class="${S.view===a[0]?'on':''}" data-action="view" data-v="${a[0]}" aria-pressed="${S.view===a[0]}">${a[1]}</button>`).join('')}</div>${legendHTML()}</div>`;
+  if(!S.steps.length)return h+`<div class="empty"><div class="ghost"><i></i><u></u><i></i><u></u><i></i></div><p>Your map builds here as you add steps.</p></div></div>`;
+  const cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),hasImp=S.imps.some(i=>i.on);
+  const showF=S.view!=='current'&&hasImp;
+  h+=kstrip(mc,mf,showF);
+  h+='<div class="scroll">';
+  if(S.view!=='current'&&!hasImp)h+=`<p class="hint">No improvements yet, so the future state matches today. Add ideas in “Test the fixes”.</p>`;
+  if(S.view==='current'||S.view==='compare')h+=`<div class="maphead">Current state</div>`+mapSVG(cur);
+  if(S.view==='future'||S.view==='compare')h+=`<div class="maphead">Future state</div>`+mapSVG(fut);
+  return h+'</div></div>';
+}
+function renderMapPane(){
+  const p=$('#mapPane');if(!p)return;
+  const old=$('.scroll',p),left=old?old.scrollLeft:0;
+  p.innerHTML=mapPaneHTML();
+  const nw=$('.scroll',p);if(nw&&left)nw.scrollLeft=left;
+}
+
+/* ---------- reference documents and Claude ---------- */
+const AI={sample:null,imgs:false,busy:'',ctl:null,q:'',ans:'',msg:{t:'',busy:false,err:false}};
+let DRAFT=null,AISUGS=[],LOOK=null,REFS_OPEN=null;
+const MAXDOC=30000;
+const UN={min:'minutes',h:'hours',d:'days'};
+const KINDN={pdf:'PDF',docx:'Word',xlsx:'Spreadsheet',text:'Text',image:'Image, read by Claude'};
+const LIBS={
+  mammoth:{src:['https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js'],ok:()=>window.mammoth},
+  xlsx:{src:['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'],ok:()=>window.XLSX},
+  pdf:{src:['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js','https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'],ok:()=>window.pdfjsLib}
+};
+const loading={};
+function loadScript(src){return new Promise((res,rej)=>{const t=document.createElement('script');t.src=src;t.onload=res;t.onerror=()=>rej(new Error('The file reader couldn’t load. Check your connection, or paste the text instead.'));document.head.appendChild(t)})}
+async function lib(name){
+  const L=LIBS[name];if(L.ok())return;
+  if(!loading[name])loading[name]=(async()=>{for(const u of L.src)await loadScript(u)})();
+  try{await loading[name]}catch(e){loading[name]=null;throw e}
+  if(!L.ok())throw new Error('The file reader isn’t available here. Paste the text instead.');
+  if(name==='pdf')window.pdfjsLib.GlobalWorkerOptions.workerSrc=L.src[1];
+}
+const normText=t=>String(t||'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/ ?\n ?/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+async function readFile(f){
+  const ext=(f.name.split('.').pop()||'').toLowerCase();
+  if(['txt','md','csv','tsv','json','log'].includes(ext)||(f.type||'').startsWith('text/'))return{kind:'text',text:await f.text()};
+  if(ext==='docx'){await lib('mammoth');const r=await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()});return{kind:'docx',text:r.value}}
+  if(ext==='xlsx'||ext==='xls'){await lib('xlsx');const wb=window.XLSX.read(await f.arrayBuffer(),{type:'array'});return{kind:'xlsx',text:wb.SheetNames.map(n=>'Sheet: '+n+'\n'+window.XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')}}
+  if(ext==='pdf'){
+    await lib('pdf');
+    const pdf=await window.pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise;
+    let out='';const n=Math.min(pdf.numPages,40);
+    for(let p=1;p<=n;p++){const pg=await pdf.getPage(p),tc=await pg.getTextContent();out+='\n[Page '+p+']\n'+tc.items.map(i=>i.str+(i.hasEOL?'\n':' ')).join('')}
+    return{kind:'pdf',text:out};
+  }
+  if(/^image\//.test(f.type||'')||['png','jpg','jpeg','webp','gif'].includes(ext)){
+    if(!AI.sample||!AI.imgs)throw new Error('Reading images needs Claude access, which isn’t available in this view.');
+    const r=await AI.sample('This image is a process map or process document. Transcribe it as plain text: list every step in order with who does it, decisions and branches, handoffs, and any times, volumes or notes shown. Do not invent anything that is not visible.',{images:[f]});
+    return{kind:'image',text:r.text};
+  }
+  if(['doc','ppt','pptx'].includes(ext))throw new Error('This format can’t be read here. Save it as .docx or PDF and upload it again.');
+  throw new Error('This file type isn’t supported. Use PDF, Word, Excel, CSV, text'+(AI.imgs?' or an image':'')+'.');
+}
+async function addFiles(files){
+  for(const f of Array.from(files)){
+    const d={id:uid(),name:f.name,kind:'text',status:'reading',err:'',text:'',size:f.size};
+    S.docs.push(d);renderRefs();
+    try{
+      const r=await readFile(f);
+      d.kind=r.kind;d.text=normText(r.text);
+      if(d.text.length<30)throw new Error('No readable text found.'+(r.kind==='pdf'?' If this is a scan, upload a screenshot of the page'+(AI.imgs?' as an image.':', or paste the text.'):''));
+      if(d.text.length>MAXDOC){d.text=d.text.slice(0,MAXDOC);d.cut=true}
+      d.status='ready';
+    }catch(e){d.status='error';d.err=(e&&e.code?aiErr(e):(e&&e.message))||'Couldn’t read this file.';d.text=''}
+    if(S.docs.includes(d)){save();renderRefs()}
+  }
+}
+function aiErr(e){
+  const c=e&&e.code;
+  if(c==='rate_limited')return 'Too many requests right now. Wait a moment and try again.';
+  if(c==='prompt_too_large')return 'The documents are too long to send together. Remove one, or paste a shorter excerpt.';
+  if(c==='invalid_json')return 'Claude’s reply couldn’t be read. Try again.';
+  if(c==='image_rejected')return 'That image couldn’t be used. Try a PNG or JPG under 20 MB.';
+  if(c==='refused')return 'Claude declined to process this content.';
+  if(STANDALONE&&c==='not_granted')return 'The API key was rejected. Check it under Claude connection.';
+  if(['not_granted','sampling_disabled','not_declared','capability_disabled','capability_removed','images_unavailable'].includes(c))return 'Claude access isn’t available for this page, so documents can’t be read automatically.';
+  if(c==='session_expired')return 'Your session expired. Sign in to Claude again and retry.';
+  return 'Something went wrong reaching Claude. Try again.';
+}
+function paintMsg(){
+  const m=AI.msg;
+  document.querySelectorAll('.aimsg').forEach(el=>{el.className='aimsg'+(m.err?' err':'');el.innerHTML=m.busy?`<span class="spin"></span>${esc(m.t)} <button type="button" class="btn small ghost" data-action="stop">Stop</button>`:esc(m.t)});
+}
+const aiOK=()=>!!AI.sample&&S.docs.some(d=>d.status==='ready');
+function syncAi(){document.querySelectorAll('[data-ai]').forEach(b=>{b.disabled=!aiOK()||!!AI.busy})}
+function setMsg(t,busy,err){AI.msg={t:t||'',busy:!!busy,err:!!err};paintMsg();syncAi()}
+async function runAI(label,fn){
+  if(AI.busy||!AI.sample)return;
+  AI.busy=label;AI.ctl=new AbortController();setMsg(label+'…',true);
+  try{await fn(AI.ctl.signal);if(AI.msg.busy)setMsg('',false)}
+  catch(e){if(e&&e.code==='cancelled')setMsg('Stopped.',false);else setMsg(aiErr(e),false,true)}
+  finally{AI.busy='';AI.ctl=null;syncAi()}
+}
+function docsText(){
+  const rd=S.docs.filter(d=>d.status==='ready');if(!rd.length)return '';
+  const per=Math.floor(150000/rd.length);
+  return rd.map(d=>'=== Document: '+d.name+' ===\n'+d.text.slice(0,per)).join('\n\n');
+}
+const nn=v=>(v==null||v===''||isNaN(+v)||+v<0)?null:+v;
+
+function normDraft(r){
+  r=r||{};
+  const arr=Array.isArray(r.steps)?r.steps:(Array.isArray(r)?r:[]);
+  const unit=['min','h','d'].includes(r.unit)?r.unit:S.scope.unit;
+  const steps=arr.slice(0,14).map(x=>{
+    const miss=[],t=nn(x.touch),w=nn(x.wait);let y=nn(x.yield);
+    if(t==null)miss.push('touch');if(w==null)miss.push('wait');if(y==null||y<1||y>100){y=null;miss.push('yield')}
+    return newStep({name:clip(String(x.name||'Untitled step'),40),owner:clip(String(x.owner||''),40),touch:t||0,wait:w||0,yield:y==null?100:Math.round(y),cls:['va','req','waste'].includes(x.cls)?x.cls:'req',cause:CAUSES.includes(x.cause)?x.cause:'',loss:LOSSES.includes(x.loss)?x.loss:'',src:clip(String(x.source||''),200),missing:miss});
+  });
+  return{scope:{name:String(r.name||'').slice(0,80),input:String(r.input||'').slice(0,30),output:String(r.output||'').slice(0,30),unit},steps};
+}
+function draftHTML(){
+  if(!DRAFT)return '';
+  const u=DRAFT.scope.unit,miss=DRAFT.steps.filter(s=>s.missing.length).length;
+  return `<div class="draft"><b>Claude found ${DRAFT.steps.length} steps</b><ol>${DRAFT.steps.map(s=>`<li>${esc(s.name)}<span class="mut"> (${s.missing.includes('touch')?'work not stated':fmt(s.touch)+' '+u+' work'}, ${s.missing.includes('wait')?'wait not stated':fmt(s.wait)+' '+u+' wait'})</span></li>`).join('')}</ol><p class="hint">${miss?`${miss} of these have numbers the documents don’t state. You’ll be asked for them next.`:'Every number came from your documents.'} Times are in ${UN[u]}.</p><div class="chips" style="margin-top:8px"><button type="button" class="btn small primary" data-action="applyNew">Use as the map</button>${S.steps.length?'<button type="button" class="btn small" data-action="applyAdd">Add to current map</button>':''}<button type="button" class="btn small ghost" data-action="discard">Discard</button></div></div>`;
+}
+async function draftMap(){
+  const txt=docsText();if(!txt)return;
+  const u=U();
+  const unitRule=S.steps.length?`Express every time in ${UN[u]}, and set "unit" to "${u}".`:'Choose the unit ("min", "h" or "d") that best fits the step durations and express every time in it.';
+  const ctx=S.steps.length?`The map already has these steps, so do not repeat them: ${S.steps.map(s=>s.name||'Untitled step').join(', ')}.\n\n`:'';
+  await runAI('Reading your documents',async signal=>{
+    const prompt=`You are helping a BPO and CX transformation consultant build a value stream map from reference documents.
+
+Read the documents and extract the end-to-end process as an ordered list of steps.
+
+Reply with ONLY a JSON object of this shape:
+{"name": string, "input": string, "output": string, "unit": "min" | "h" | "d", "steps": [{"name": string, "owner": string, "touch": number | null, "wait": number | null, "yield": number | null, "cls": "va" | "req" | "waste", "cause": string, "loss": string, "source": string}]}
+
+Rules:
+- 3 to 12 steps, in the order work flows. Step names are 2 to 4 words.
+- name is the stream name. input and output are short nouns for what goes in and what comes out, for example "applicants" and "agent".
+- touch is hands-on time for one unit of work. wait is idle or queue time before the step starts. yield is the percentage that passes the step right first time, from 1 to 100.
+- ${unitRule}
+- Use null for touch, wait or yield whenever the documents do not state or clearly imply a number. Never guess numbers.
+- cls is "va" if the customer would value the step, "req" if it is needed for compliance, security or handoff but adds no customer value, and "waste" for rework, duplicate checks or approvals that add nothing.
+- cause is what makes work wait before the step, one of ${CAUSES.join(', ')}, or "" if unknown. loss is what makes work fail first time, one of ${LOSSES.join(', ')}, or "".
+- source is a short quote or close paraphrase from the documents that supports the step, under 160 characters.
+
+${ctx}Documents:
+
+${txt}`;
+    const r=await AI.sample.json(prompt,{signal});
+    const d=normDraft(r);
+    if(!d.steps.length)throw{code:'invalid_json'};
+    DRAFT=d;renderRefs();
+  });
+}
+function applyDraft(mode){
+  if(!DRAFT)return;
+  const d=DRAFT;
+  if(mode==='new'){
+    S.scope.unit=d.scope.unit;
+    if(d.scope.name)S.scope.name=d.scope.name;
+    if(d.scope.input)S.scope.input=d.scope.input;
+    if(d.scope.output)S.scope.output=d.scope.output;
+    S.steps=d.steps;S.imps=[];
+  }else S.steps=S.steps.concat(d.steps);
+  S.sel=d.steps[0].id;DRAFT=null;AISUGS=[];LOOK=null;save();go(2);
+}
+async function askDocs(){
+  const inp=$('#askIn'),q=((inp&&inp.value)||'').trim();
+  if(!q||!aiOK())return;
+  AI.q=q;AI.ans='';paintAns();
+  const ctx=S.steps.length?`For context, the consultant is mapping these steps: ${S.steps.map(s=>s.name||'Untitled step').join(', ')}.\n\n`:'';
+  await runAI('Checking your documents',async signal=>{
+    const r=await AI.sample(`Answer the question using only the documents below. If they don't say, say so plainly. Name the document you used in brackets. Keep it under 150 words and write in plain prose.\n\n${ctx}Question: ${q}\n\n${docsText()}`,{signal,cache:false,onText:({text})=>{AI.ans=text;paintAns()}});
+    AI.ans=r.text;paintAns();
+  });
+}
+function paintAns(){const o=$('#askOut');if(o)o.textContent=AI.ans}
+function lookupHTML(){
+  const s=sel();if(!LOOK||!s||LOOK.id!==s.id)return '';
+  const u=U();
+  if(!LOOK.found)return `<div class="src"><b>Not in your documents</b><p>${esc(LOOK.notes||'Nothing was found about this step.')}</p></div>`;
+  const bits=[];
+  if(LOOK.touch!=null)bits.push(`${fmt(LOOK.touch)} ${u} hands-on`);
+  if(LOOK.wait!=null)bits.push(`${fmt(LOOK.wait)} ${u} waiting`);
+  if(LOOK.yield!=null)bits.push(`${fmt(LOOK.yield)}% right first time`);
+  return `<div class="src"><b>${bits.length?esc(bits.join(', ')):'No numbers stated'}</b>${LOOK.evidence?`<p>“${esc(LOOK.evidence)}”</p>`:''}${LOOK.notes?`<p>${esc(LOOK.notes)}</p>`:''}${bits.length?'<button type="button" class="btn small" data-action="applyLookup" style="margin-top:8px">Use these numbers</button>':''}</div>`;
+}
+async function lookupStep(){
+  const s=sel();if(!s||!aiOK())return;
+  const u=U(),txt=docsText();
+  await runAI('Checking your documents',async signal=>{
+    const r=await AI.sample.json(`Find what the documents say about one step of a process and reply with ONLY JSON:
+{"found": boolean, "touch": number | null, "wait": number | null, "yield": number | null, "evidence": string, "notes": string}
+
+Step: "${s.name||'Untitled step'}"${s.owner?` (owner: ${s.owner})`:''}
+Express times in ${UN[u]}, converting if the documents use another unit. touch is hands-on time for one unit of work, wait is idle time before the step starts, yield is the percentage that passes right first time (1 to 100). Use null for anything the documents do not state or clearly imply. Never guess. evidence is a short quote or close paraphrase under 200 characters. notes is one sentence on anything else relevant, such as rules, handoffs or pain points.
+
+Documents:
+
+${txt}`,{signal});
+    LOOK={id:s.id,found:!!(r&&r.found),touch:nn(r&&r.touch),wait:nn(r&&r.wait),yield:nn(r&&r.yield),evidence:String((r&&r.evidence)||'').slice(0,240),notes:String((r&&r.notes)||'').slice(0,240)};
+    const o=$('#lookupOut');if(o)o.innerHTML=lookupHTML();
+  });
+}
+function applyLookup(){
+  const s=sel();if(!s||!LOOK||LOOK.id!==s.id)return;
+  const L=LOOK;
+  if(L.touch!=null){s.touch=L.touch;s.missing=(s.missing||[]).filter(k=>k!=='touch')}
+  if(L.wait!=null){s.wait=L.wait;s.missing=(s.missing||[]).filter(k=>k!=='wait')}
+  if(L.yield!=null&&L.yield>=1&&L.yield<=100){s.yield=Math.round(L.yield);s.missing=(s.missing||[]).filter(k=>k!=='yield')}
+  if(L.evidence)s.src=L.evidence;
+  LOOK=null;save();renderPanel();renderMapPane();
+}
+async function findIdeas(){
+  if(!aiOK()||!S.steps.length)return;
+  const u=U(),txt=docsText();
+  const list=S.steps.map((s,i)=>`${i}. ${s.name||'Untitled step'} (owner: ${s.owner||'unknown'}): hands-on ${fmt(s.touch)} ${u}, waits ${fmt(s.wait)} ${u}${s.cause?' because of '+s.cause.toLowerCase():''}, ${s.yield}% right first time, ${CLSN[s.cls].toLowerCase()}`).join('\n');
+  await runAI('Looking for ideas in your documents',async signal=>{
+    const r=await AI.sample.json(`You are advising a BPO and CX transformation consultant. Below is the current value stream map and the reference documents. Propose process improvements that the documents give a reason for, such as stated pain points, manual handoffs, approval rules, rework or delays.
+
+Reply with ONLY a JSON array of up to 6 objects:
+[{"step": number, "title": string, "lever": string, "waitCut": number, "touchCut": number, "yieldGain": number, "effort": "Low" | "Medium" | "High", "why": string, "source": string}]
+
+Rules:
+- step is the index of the step from the list below.
+- title is under 70 characters. lever is one of ${LEVERS.join(', ')}.
+- waitCut and touchCut are percentages from 0 to 100. yieldGain is percentage points from 0 to 30. Be conservative.
+- why is one sentence under 140 characters tied to the documents. source is a short quote or close paraphrase from the documents, under 140 characters.
+- Skip ideas the documents give no basis for.
+
+Current map (times in ${UN[u]}):
+${list}
+
+Documents:
+
+${txt}`,{signal});
+    const arr=Array.isArray(r)?r:(r&&Array.isArray(r.ideas)?r.ideas:[]);
+    const c=(v,m)=>Math.max(0,Math.min(m,Math.round((+v||0)/5)*5));
+    AISUGS=arr.slice(0,6).map(x=>{
+      const st=S.steps[Math.round(+x.step)];if(!st)return null;
+      const g={stepId:st.id,title:clip(String(x.title||'Improve this step'),80),lever:LEVERS.includes(x.lever)?x.lever:'Other',waitCut:c(x.waitCut,100),touchCut:c(x.touchCut,100),yieldGain:Math.max(0,Math.min(30,Math.round(+x.yieldGain||0))),effort:EFFORTS.includes(x.effort)?x.effort:'Medium',why:clip(String(x.why||''),160),source:clip(String(x.source||''),160)};
+      g.est=st.wait*g.waitCut/100+st.touch*g.touchCut/100;return g;
+    }).filter(Boolean);
+    const l=$('#sugList');if(l)l.innerHTML=sugListHTML();
+    setMsg(AISUGS.length?'':'Nothing in the documents pointed to a specific fix.',false);
+  });
+}
+function docTools(s){
+  let h=s.src?`<div class="src"><b>From your documents</b><p>“${esc(s.src)}”</p></div>`:'';
+  if(AI.sample&&S.docs.some(d=>d.status==='ready'))h+=`<div class="aibar"><button type="button" class="btn small" data-action="lookup" data-ai>Check the documents for this step</button><div class="aimsg"></div></div><div id="lookupOut">${lookupHTML()}</div>`;
+  return h;
+}
+const miss=(s,k)=>`<small class="warn" data-missfor="${k}" ${(s.missing||[]).includes(k)?'':'hidden'}>Not in your documents. Add your estimate.</small>`;
+function ideasBar(){
+  if(!AI.sample)return '';
+  return `<div class="aibar"><button type="button" class="btn small" data-action="ideas" data-ai>Find ideas in my documents</button><div class="aimsg"></div>${S.docs.some(d=>d.status==='ready')?'':'<small>Add a reference document above to use this.</small>'}</div>`;
+}
+function docRowHTML(d){
+  const meta=d.status==='ready'?`${KINDN[d.kind]||'Text'}, ${d.text.length>=1000?fmt(d.text.length/1000)+'k':d.text.length} characters${d.cut?' (trimmed)':''}`:'';
+  const body=d.status==='reading'?'<small><span class="spin"></span>Reading…</small>':d.status==='error'?`<small class="warn">${esc(d.err)}</small>`:`<details><summary>Preview what was read</summary><pre>${esc(d.text.slice(0,1200))}${d.text.length>1200?'…':''}</pre></details>`;
+  return `<div class="doc"><div class="dtop"><span class="dname">${esc(d.name)}</span><span class="dmeta">${esc(meta)}</span><button type="button" class="x" data-action="rmDoc" data-id="${d.id}" aria-label="Remove ${esc(d.name)}">×</button></div>${body}</div>`;
+}
+function refsInner(){
+  const open=REFS_OPEN!==null?REFS_OPEN:S.stage===1;
+  const accept='.pdf,.docx,.xlsx,.xls,.csv,.tsv,.txt,.md,.json'+(AI.imgs?',image/png,image/jpeg,image/webp,image/gif':'');
+  const ai=AI.sample?`<button type="button" class="btn small primary" data-action="draftMap" data-ai>${S.steps.length?'Draft more steps from my documents':'Draft the map from my documents'}</button><div class="aimsg"></div>${draftHTML()}
+<div class="ask"><label class="f" style="margin-bottom:0"><span>Ask your documents</span><div class="num"><input id="askIn" placeholder="e.g. What does the SOP say about approvals?" value="${esc(AI.q)}"><button type="button" class="btn small" data-action="ask" data-ai>Ask</button></div></label><div class="askout" id="askOut">${esc(AI.ans)}</div></div>
+<small>${STANDALONE?'Claude reads your documents only when you click one of these. Requests go from your browser to the endpoint you set, using your key.':'Claude reads your documents only when you click one of these. The first time, it asks for your permission and uses your Claude account.'}</small>`:(STANDALONE?'<p class="hint">Connect Claude below to read documents automatically. Until then, documents are kept here for reference.</p>':'<p class="hint">Claude access isn’t available in this view, so documents are kept here for reference only.</p>');
+  return `<details class="refs" id="refsBox" ${open?'open':''}><summary>Reference documents<span class="count">${S.docs.length}</span></summary><div class="refbody">
+<div class="drop" id="drop"><p>Drop a process document, SOP, spreadsheet or process map here.</p><button type="button" class="btn small" data-action="pick">Choose files</button><input type="file" id="fileIn" multiple hidden accept="${accept}"><small>PDF, Word, Excel, CSV, text${AI.imgs?', or an image of a process map':''}. Files stay in this browser.</small></div>
+<details class="paste"><summary>Or paste text</summary><textarea id="pasteIn" placeholder="Paste an SOP, a process description or meeting notes" aria-label="Pasted text"></textarea><button type="button" class="btn small" data-action="addText">Add pasted text</button></details>
+${S.docs.map(docRowHTML).join('')}${S.docs.length?'':'<p class="hint" style="margin-top:0">No documents yet.</p>'}
+${ai}${STANDALONE?cfgHTML():''}</div></details>`;
+}
+function renderRefs(){const el=$('#refs');if(el)el.innerHTML=refsInner();paintMsg();syncAi()}
+
+function topHTML(){
+  const r=S.reset?`<span>Clear the map and documents?</span><button class="btn small" data-action="resetYes">Yes, clear it</button><button class="btn small ghost" data-action="resetNo">Keep it</button>`:`<button class="btn small ghost" data-action="reset">Start over</button>`;
+  return `<header class="top"><div><h1>Stream mapper</h1><p class="tag">Map how work flows, see where it waits, and size the fixes before you commit to them.</p></div><div class="reset">${r}</div></header>`;
+}
+const STG=[[1,'Scope'],[2,'Map the steps'],[3,'Test the fixes'],[4,'Results']];
+function stagesHTML(){
+  return `<nav class="stages" aria-label="Progress">${STG.map(a=>{const v=a[0],dis=v>=3&&!S.steps.length;
+    return `<button type="button" class="stg${v<S.stage?' done':''}" data-action="stage" data-v="${v}" ${v===S.stage?'aria-current="step"':''} ${dis?'disabled':''}><span class="n">${v<S.stage?'✓':v}</span>${a[1]}</button>`}).join('')}</nav>`;
+}
+function navHTML(){
+  const back=S.stage>1?`<button class="btn ghost" data-action="back">Back</button>`:'<span></span>';
+  const dis=S.stage===2&&!S.steps.length;
+  const lb={1:'Next: map the steps',2:'Next: test the fixes',3:'See results and download'};
+  return `<div class="nav">${back}<button class="btn primary" data-action="next" ${dis?'disabled':''}>${lb[S.stage]}</button></div>${dis?'<p class="hint">Add at least one step to continue.</p>':''}`;
+}
+
+function p1(){
+  const c=S.scope,u=c.unit;
+  return `<h2>Set the scope</h2><p class="lead">A few answers to frame the map. You can change any of them later.</p>
+<div class="tpl"><span class="lbl">Start from an example</span><div class="chips"><button type="button" class="chip" data-action="tpl" data-v="hiring">Recruitment to training</button><button type="button" class="chip" data-action="tpl" data-v="refund">Refund requests</button><button type="button" class="chip" data-action="tpl" data-v="blank">Blank</button></div><p class="hint" style="margin:0">Loading an example replaces what’s on the map.</p></div>
+<div class="refwrap" id="refs">${refsInner()}</div>
+<label class="f"><span>What stream are you mapping?</span><input data-bind="scope.name" value="${esc(c.name)}" placeholder="e.g. Recruitment to nesting"></label>
+<label class="f"><span>Which account or line of business?</span><input data-bind="scope.account" value="${esc(c.account)}" placeholder="e.g. Voice account"></label>
+<div class="row2"><label class="f"><span>What goes in?</span><input data-bind="scope.input" value="${esc(c.input)}" placeholder="applicants, contacts"></label><label class="f"><span>What comes out?</span><input data-bind="scope.output" value="${esc(c.output)}" placeholder="agent, resolved case"></label></div>
+<div class="f"><span>Which unit of time do you measure in?</span><div class="seg" role="group" aria-label="Unit of time">${[['min','Minutes'],['h','Hours'],['d','Days']].map(a=>`<button type="button" class="${u===a[0]?'on':''}" data-action="unit" data-v="${a[0]}" aria-pressed="${u===a[0]}">${a[1]}</button>`).join('')}</div><small>Every time you enter is read in this unit.</small></div>
+<div class="row2"><label class="f"><span>How much demand do you serve?</span><input type="number" min="0" step="any" data-bind="scope.demand" value="${esc(c.demand)}" placeholder="Optional"></label><label class="f"><span>Per</span><select data-bind="scope.per">${['day','week','month','quarter'].map(p=>`<option ${c.per===p?'selected':''}>${p}</option>`).join('')}</select></label></div>`+navHTML();
+}
+
+function chip(kind,val,on){return `<button type="button" class="chip${on?' on':''}" data-action="chip" data-k="${kind}" data-v="${esc(val)}" aria-pressed="${on}">${esc(val)}</button>`}
+function stepRowsHTML(){
+  const u=U();
+  return S.steps.map((s,i)=>`<div class="srow${s.id===S.sel?' sel':''}"><button type="button" class="sbtn" data-action="selStep" data-id="${s.id}"><span class="dot ${s.cls}"></span><span class="sname">${esc(s.name||'Untitled step')}</span><span class="smeta">${fmt(s.touch)} ${u} work, ${fmt(s.wait)} ${u} wait</span>${(s.missing||[]).length?'<span class="smeta warn">Needs your estimate</span>':''}</button><span class="sact"><button type="button" data-action="up" data-id="${s.id}" aria-label="Move step up" ${i===0?'disabled':''}>↑</button><button type="button" data-action="down" data-id="${s.id}" aria-label="Move step down" ${i===S.steps.length-1?'disabled':''}>↓</button><button type="button" data-action="delStep" data-id="${s.id}" aria-label="Remove step">×</button></span></div>`).join('');
+}
+function insightHTML(s){
+  const m=model(false),mx=Math.max.apply(null,m.steps.map(x=>x.w)),out=[];
+  if(s.touch>0&&s.wait>=2*s.touch)out.push(`Work waits ${fmt(s.wait/s.touch)}× longer than it’s worked on here.`);
+  if(S.steps.length>1&&s.wait>0&&s.wait===mx)out.push('This is the longest wait in the stream.');
+  if(s.yield<90)out.push(`${100-s.yield} in every 100 needs rework or drops out here.`);
+  if(s.cls==='waste')out.push('Marked as waste, so it’s a candidate to remove.');
+  return out.length?out.map(t=>`<p>${t}</p>`).join(''):'<p class="mut">Nothing stands out yet. Add the next step when you’re ready.</p>';
+}
+function stepEditorHTML(){
+  const s=sel(),u=U();
+  if(!s)return `<p class="hint">Add your first step to begin.</p>`;
+  return `<div class="editor"><h3>Tell me about this step</h3>
+<label class="f"><span>What happens in this step?</span><input data-bind="step.name" value="${esc(s.name)}" placeholder="e.g. Interviews"></label>
+${docTools(s)}
+<label class="f"><span>Who does the work?</span><input data-bind="step.owner" value="${esc(s.owner)}" placeholder="Team or role"></label>
+<div class="row2"><label class="f"><span>How long does the hands-on work take?</span><div class="num"><input type="number" min="0" step="any" data-bind="step.touch" value="${s.touch}"><em>${u}</em></div><small>Average for one unit, not the best case.</small>${miss(s,'touch')}</label>
+<label class="f"><span>How long does work wait before this starts?</span><div class="num"><input type="number" min="0" step="any" data-bind="step.wait" value="${s.wait}"><em>${u}</em></div><small>Queue or idle time. Use 0 if none.</small>${miss(s,'wait')}</label></div>
+<div id="causeBlock" ${s.wait>0?'':'hidden'}><span class="lbl">What mostly causes the wait?</span><div class="chips">${CAUSES.map(c=>chip('cause',c,s.cause===c)).join('')}</div><div class="f"><input data-bind="step.note" value="${esc(s.note)}" placeholder="Anything specific? (optional)" aria-label="Detail on the wait"></div></div>
+<div class="f"><span>How often is it right the first time? <b id="yv">${s.yield}%</b></span><input type="range" min="1" max="100" step="1" data-bind="step.yield" value="${s.yield}" aria-label="First-time-right percentage">${miss(s,'yield')}</div>
+<div id="lossBlock" ${s.yield<90?'':'hidden'}><span class="lbl">What goes wrong when it isn’t?</span><div class="chips">${LOSSES.map(c=>chip('loss',c,s.loss===c)).join('')}</div></div>
+<fieldset class="f"><legend>Does this step add value for the customer?</legend>${['va','req','waste'].map(k=>`<label class="radio"><input type="radio" name="cls" data-bind="step.cls" value="${k}" ${s.cls===k?'checked':''}><span><b>${CLSN[k]}</b><small>${CLSD[k]}</small></span></label>`).join('')}</fieldset>
+<div class="insight" id="insight">${insightHTML(s)}</div></div>`;
+}
+function p2(){
+  ensureSel();
+  return `<h2>Map the steps</h2><p class="lead">Add each step in the order work flows. Answer for the typical case.</p><div class="refwrap" id="refs">${refsInner()}</div><div id="stepList">${stepRowsHTML()}</div><button type="button" class="btn small" data-action="addStep" style="margin-top:4px">Add a step</button>${stepEditorHTML()}`+navHTML();
+}
+
+function suggestions(){
+  const out=[],u=U(),tot=model(false).steps.reduce((a,s)=>a+s.t,0);
+  S.steps.forEach(s=>{
+    const add=o=>{if(S.imps.some(i=>i.stepId===s.id&&i.title===o.title))return;out.push(Object.assign({stepId:s.id,waitCut:0,touchCut:0,yieldGain:0},o,{est:s.wait*(o.waitCut||0)/100+s.touch*(o.touchCut||0)/100}))};
+    if(s.cls==='waste'){add({title:'Remove this step',lever:'Eliminate',waitCut:100,touchCut:100,effort:'Medium',why:`Marked as waste, and it holds ${fmt(s.touch+s.wait)} ${u} of the stream.`});return}
+    if(s.wait>0){const c=SUG[s.cause||'Other'];add({title:c.title,lever:c.lever,waitCut:c.waitCut,touchCut:c.touchCut||0,effort:c.effort,why:`Work waits ${fmt(s.wait)} ${u} here${s.cause?', mostly from '+s.cause.toLowerCase():''}.`})}
+    if(s.yield<90)add({title:'Add a first-time-right checklist',lever:'Standardize',yieldGain:Math.min(10,100-s.yield),effort:'Low',why:`${100-s.yield} in every 100 doesn’t pass first time${s.loss?' ('+s.loss.toLowerCase()+')':''}.`});
+    if(s.cls==='req'&&s.touch>0&&tot>0&&s.touch>=0.1*tot)add({title:'Automate repetitive handling',lever:'Automate',touchCut:40,effort:'Medium',why:`Needed but adds no value, and takes ${fmt(s.touch)} ${u} of hands-on time.`});
+  });
+  return out.sort((a,b)=>b.est-a.est).slice(0,6);
+}
+let SUGS=[];
+function sugListHTML(){
+  SUGS=suggestions();
+  const ai=AISUGS.map((g,i)=>[g,i]).filter(a=>!S.imps.some(m=>m.stepId===a[0].stepId&&m.title===a[0].title));
+  if(!SUGS.length&&!ai.length)return `<p class="hint">No more suggestions. Add your own idea below.</p>`;
+  let h=ai.map(a=>{const g=a[0],st=S.steps.find(x=>x.id===g.stepId);return `<div class="sug"><div><b>${esc(g.title)}</b><span><em class="badge">From your documents</em>${esc(st?st.name||'Untitled step':'')}: ${esc(g.why)}</span>${g.source?`<span class="srcq">“${esc(g.source)}”</span>`:''}</div><button type="button" class="btn small" data-action="addAiSug" data-i="${a[1]}">Add</button></div>`}).join('');
+  h+=SUGS.map((g,i)=>{const st=S.steps.find(x=>x.id===g.stepId);return `<div class="sug"><div><b>${esc(g.title)}</b><span>${esc(st?st.name||'Untitled step':'')}: ${esc(g.why)}</span></div><button type="button" class="btn small" data-action="addSug" data-i="${i}">Add</button></div>`}).join('');
+  return h;
+}
+function slider(i,key,label,s){
+  const isY=key==='yieldGain',max=isY?Math.max(0,100-s.yield):100;
+  const en=isY?max>0:(key==='waitCut'?s.wait>0:s.touch>0);
+  return `<div class="sl"><label for="sl-${i.id}-${key}">${label}</label><input id="sl-${i.id}-${key}" type="range" min="0" max="${max}" step="${isY?1:5}" data-bind="imp.${key}" data-id="${i.id}" value="${Math.min(i[key],max)}" ${en?'':'disabled'}><output data-ro="${key}"></output></div>`;
+}
+function impCardHTML(i){
+  const s=S.steps.find(x=>x.id===i.stepId)||S.steps[0];
+  return `<div class="imp${i.on?'':' off'}" data-id="${i.id}"><div class="imphead"><label class="chk"><input type="checkbox" data-bind="imp.on" data-id="${i.id}" ${i.on?'checked':''}><span class="sr">Include in the future state</span></label><input class="imptitle" data-bind="imp.title" data-id="${i.id}" value="${esc(i.title)}" placeholder="Describe the change" aria-label="Improvement"><button type="button" class="x" data-action="delImp" data-id="${i.id}" aria-label="Remove improvement">×</button></div>
+<div class="row3"><label class="f"><span>Where</span><select data-bind="imp.stepId" data-id="${i.id}">${S.steps.map(x=>`<option value="${x.id}" ${x.id===s.id?'selected':''}>${esc(x.name||'Untitled step')}</option>`).join('')}</select></label>
+<label class="f"><span>Type</span><select data-bind="imp.lever" data-id="${i.id}">${LEVERS.map(l=>`<option ${i.lever===l?'selected':''}>${l}</option>`).join('')}</select></label>
+<label class="f"><span>Effort</span><select data-bind="imp.effort" data-id="${i.id}">${EFFORTS.map(l=>`<option ${i.effort===l?'selected':''}>${l}</option>`).join('')}</select></label></div>
+${slider(i,'waitCut','Cut waiting by',s)}${slider(i,'touchCut','Cut hands-on time by',s)}${slider(i,'yieldGain','Lift first-time-right by',s)}<div class="saves" data-saves="${i.id}"></div></div>`;
+}
+function p3(){
+  return `<h2>Test the fixes</h2><p class="lead">Take a suggestion or add your own. Move the sliders to size each change and watch the map update.</p>
+<div class="refwrap" id="refs">${refsInner()}</div>
+<h3 style="margin-top:0">Suggested ideas</h3>${ideasBar()}<div id="sugList"></div>
+<h3>Your improvements</h3><div class="total" id="impTotal"></div><div id="impList"></div><button type="button" class="btn small" data-action="addImp">Add your own idea</button>`+navHTML();
+}
+function renderStage3Lists(){
+  const a=$('#sugList'),b=$('#impList');
+  if(a)a.innerHTML=sugListHTML();
+  if(b)b.innerHTML=S.imps.length?S.imps.map(impCardHTML).join(''):'<p class="hint">Nothing here yet. Add a suggestion above to start.</p>';
+  updateImpLive();
+}
+function updateImpLive(){
+  const u=U(),fm=model(true),mc=metrics(model(false)),mf=metrics(fm);
+  S.imps.forEach(i=>{
+    const card=document.querySelector(`.imp[data-id="${i.id}"]`),s=S.steps.find(x=>x.id===i.stepId);
+    if(!card||!s)return;
+    card.classList.toggle('off',!i.on);
+    const set=(k,t)=>{const o=card.querySelector(`[data-ro="${k}"]`);if(o)o.textContent=t};
+    set('waitCut',`${i.waitCut}%: ${fmt(s.wait)} → ${fmt(s.wait*(1-i.waitCut/100))} ${u}`);
+    set('touchCut',`${i.touchCut}%: ${fmt(s.touch)} → ${fmt(s.touch*(1-i.touchCut/100))} ${u}`);
+    const g=Math.min(i.yieldGain,100-s.yield);
+    set('yieldGain',`+${g} pts: ${s.yield}% → ${Math.min(100,s.yield+g)}%`);
+    const sv=fm.sav[i.id],el=card.querySelector('[data-saves]');
+    el.textContent=!i.on?'Left out of the future state.':(sv&&(sv.days>0||g>0))?`Saves ${fmt(sv.days)} ${u} of lead time${g>0?`, and lifts first-time-right by ${g} pts`:''}.`:'Move a slider to size this change.';
+  });
+  const t=$('#impTotal');
+  if(t)t.innerHTML=S.imps.some(i=>i.on)?`Together: lead time ${fmt(mc.lead)} → <b>${fmt(mf.lead)} ${u}</b>`:'Add an idea, or take a suggestion, to see the effect.';
+  renderMapPane();
+}
+
+function bar(m,mx){
+  const me=metrics(m),u=U();
+  const segs=[['wait',me.wait,'Waiting'],['va',me.va,'Adds value'],['req',me.req,'Needed, no value'],['waste',me.waste,'Waste']].filter(x=>x[1]>0);
+  return `<div class="cbar" style="width:${Math.max(0,pct(me.lead,mx))}%">${segs.map(x=>`<div class="s-${x[0]}" style="flex:${x[1]}" title="${x[2]}: ${fmt(x[1])} ${u}">${x[1]/me.lead>0.07?fmt(x[1]):''}</div>`).join('')}</div>`;
+}
+function headline(mc,mf,has){
+  const u=U();
+  if(!has)return `Today work takes ${fmt(mc.lead)} ${u} end to end, and ${fmt(pct(mc.wait,mc.lead))}% of that is waiting. Add improvements to see what could change.`;
+  return `Lead time falls from ${fmt(mc.lead)} to ${fmt(mf.lead)} ${u} (−${fmt(pct(mc.lead-mf.lead,mc.lead))}%). Waiting drops from ${fmt(mc.wait)} to ${fmt(mf.wait)} ${u}, and the value-add share moves from ${fmt(mc.pce*100)}% to ${fmt(mf.pce*100)}%.`;
+}
+function kpiCards(mc,mf,has){
+  const u=U(),inp=S.scope.input||'inputs',out=S.scope.output||'output';
+  const it=[['Lead time',mc.lead,mf.lead,v=>`${fmt(v)}<i> ${u}</i>`,-1,'%'],['Waiting',mc.wait,mf.wait,v=>`${fmt(v)}<i> ${u}</i>`,-1,'%'],['Hands-on time',mc.touch,mf.touch,v=>`${fmt(v)}<i> ${u}</i>`,-1,'%'],['Value-add share',mc.pce*100,mf.pce*100,v=>`${fmt(v)}<i>%</i>`,1,'pts'],['Right first time, overall',mc.ry*100,mf.ry*100,v=>`${fmt(v)}<i>%</i>`,1,'pts'],[`${cap(inp)} needed per ${out}`,mc.inputs,mf.inputs,v=>fmt(v),-1,'%']];
+  return it.map(a=>{const c=a[1],f=a[2],d=a[4];let dl='<small>&nbsp;</small>';
+    if(has&&Math.abs(f-c)>1e-9){const diff=f-c,good=diff*d>0,sign=diff>0?'+':'−',val=a[5]==='%'?fmt(Math.abs(pct(diff,c)))+'%':fmt(Math.abs(diff))+' pts';dl=`<small class="${good?'good':'bad'}">${sign}${val} from ${a[3](c).replace(/<[^>]+>/g,'')}</small>`}
+    return `<div class="kpi"><span>${esc(a[0])}</span><b>${a[3](has?f:c)}</b>${dl}</div>`}).join('');
+}
+function waterfall(mc,mf,fm){
+  const u=U();
+  const rows=S.imps.filter(i=>i.on&&fm.sav[i.id]).map(i=>Object.assign({i},fm.sav[i.id])).sort((a,b)=>b.days-a.days);
+  if(!rows.length)return `<p class="hint">No improvements switched on yet.</p>`;
+  let cum=0,h=`<div class="wf"><div class="wrow"><div class="wl"><b>Current lead time</b></div><div class="wt"><div class="wbar base" style="left:0;width:100%"></div></div><div class="wv">${fmt(mc.lead)} ${u}</div></div>`;
+  rows.forEach(r=>{
+    const left=pct(mc.lead-cum-r.days,mc.lead),w=pct(r.days,mc.lead);cum+=r.days;
+    const st=S.steps.find(s=>s.id===r.i.stepId);
+    h+=`<div class="wrow"><div class="wl"><b>${esc(r.i.title||'Untitled idea')}</b><span>${esc(st?st.name||'Untitled step':'')}, ${r.i.effort.toLowerCase()} effort</span></div><div class="wt"><div class="wbar sav" style="left:${left}%;width:${w}%"></div></div><div class="wv">${r.days>0?'−'+fmt(r.days)+' '+u:'+'+fmt(Math.min(r.i.yieldGain,100))+' pts yield'}</div></div>`;
+  });
+  return h+`<div class="wrow"><div class="wl"><b>Future lead time</b></div><div class="wt"><div class="wbar fut" style="left:0;width:${pct(mf.lead,mc.lead)}%"></div></div><div class="wv">${fmt(mf.lead)} ${u}</div></div></div>`;
+}
+function summaryText(){
+  const u=U(),cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),has=S.imps.some(i=>i.on),sc=S.scope;
+  let t=`${sc.name||'Value stream'}${sc.account?' ('+sc.account+')':''}\n\n`;
+  t+=`Current state: lead time ${fmt(mc.lead)} ${u}, of which ${fmt(mc.wait)} ${u} is waiting and ${fmt(mc.touch)} ${u} is hands-on work. Value-add share ${fmt(mc.pce*100)}%. Right first time overall ${fmt(mc.ry*100)}%.\n`;
+  if(has)t+=`Future state: lead time ${fmt(mf.lead)} ${u} (−${fmt(pct(mc.lead-mf.lead,mc.lead))}%), waiting ${fmt(mf.wait)} ${u}, value-add share ${fmt(mf.pce*100)}%, right first time overall ${fmt(mf.ry*100)}%.\n`;
+  if(S.docs.length)t+=`\nReference documents: ${S.docs.map(d=>d.name).join(', ')}\n`;
+  t+=`\nSteps\n`+cur.steps.map((s,i)=>`${i+1}. ${s.name||'Untitled step'} (${s.owner||'no owner'}): ${fmt(s.touch)} ${u} work, ${fmt(s.wait)} ${u} wait${s.cause?' from '+s.cause.toLowerCase():''}, ${s.yield}% right first time.`).join('\n');
+  if(has){const sv=fut.sav;t+=`\n\nImprovements\n`+S.imps.filter(i=>i.on).map(i=>{const st=S.steps.find(s=>s.id===i.stepId),v=sv[i.id]||{days:0};return `- ${i.title||'Untitled idea'} (${st?st.name:''}, ${i.effort.toLowerCase()} effort): saves ${fmt(v.days)} ${u}${i.yieldGain>0?', +'+i.yieldGain+' pts first time right':''}.`}).join('\n')}
+  return t;
+}
+/* ---------- standalone mode: browser downloads and optional bring-your-own API key ---------- */
+const MIMES={html:'text/html',csv:'text/csv',png:'image/png',svg:'image/svg+xml',json:'application/json',txt:'text/plain'};
+const browserDL={save:async o=>{
+  const ext=(o.filename.split('.').pop()||'').toLowerCase();
+  const blob=o.data instanceof Blob?o.data:new Blob([o.data],{type:(MIMES[ext]||'application/octet-stream')+';charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=o.filename;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  return{status:'saved'};
+}};
+function loadCfg(){
+  for(const st of [sessionStorage,localStorage]){
+    try{const r=st.getItem(CFG_KEY);if(!r)continue;const c=JSON.parse(r);if(c&&(c.key||(c.endpoint&&c.endpoint!==DEFEND)))return Object.assign({model:DEFMODEL,endpoint:DEFEND},c,{remember:st===localStorage})}catch(e){}
+  }
+  return null;
+}
+function storeCfg(cfg){
+  try{sessionStorage.removeItem(CFG_KEY);localStorage.removeItem(CFG_KEY)}catch(e){}
+  try{(cfg.remember?localStorage:sessionStorage).setItem(CFG_KEY,JSON.stringify({key:cfg.key,model:cfg.model,endpoint:cfg.endpoint}))}catch(e){}
+}
+function clearCfg(){try{sessionStorage.removeItem(CFG_KEY);localStorage.removeItem(CFG_KEY)}catch(e){}}
+const b64=blob=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej({code:'image_rejected',message:'read'});r.readAsDataURL(blob)});
+async function prepImage(f){
+  if(f.size<=4*1024*1024&&['image/png','image/jpeg','image/webp','image/gif'].includes(f.type))return f;
+  try{
+    const bmp=await createImageBitmap(f),sc=Math.min(1,2000/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');
+    c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+    return await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('x')),'image/jpeg',0.85));
+  }catch(e){throw{code:'image_rejected',message:'image'}}
+}
+function parseJsonReply(text,truncated){
+  const t=String(text).trim();
+  const tries=[t];
+  const fence=/```(?:json)?\s*([\s\S]*?)```/i.exec(t);if(fence)tries.push(fence[1]);
+  const a=t.search(/[\[{]/),b=Math.max(t.lastIndexOf('}'),t.lastIndexOf(']'));
+  if(a>=0&&b>a)tries.push(t.slice(a,b+1));
+  if(!truncated)for(const x of tries){try{return JSON.parse(x)}catch(e){}}
+  throw{code:'invalid_json',message:'The reply held no complete JSON value.',text};
+}
+function makeSample(cfg){
+  const call=async(input,opts,asJson)=>{
+    opts=opts||{};
+    const msgs=(typeof input==='string'?[{role:'user',content:input}]:input.map(m=>({role:m.role,content:m.content})));
+    if(opts.images){
+      const list=(opts.images instanceof Blob)?[opts.images]:Array.from(opts.images),blocks=[];
+      for(const f of list){const g=await prepImage(f);blocks.push({type:'image',source:{type:'base64',media_type:g.type||'image/jpeg',data:await b64(g)}})}
+      const last=msgs[msgs.length-1];last.content=blocks.concat([{type:'text',text:last.content}]);
+    }
+    const headers={'content-type':'application/json','anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
+    if(cfg.key)headers['x-api-key']=cfg.key;
+    let res;
+    try{res=await fetch(cfg.endpoint.replace(/\/+$/,'')+'/v1/messages',{method:'POST',signal:opts.signal,headers,body:JSON.stringify({model:cfg.model,max_tokens:8000,messages:msgs})})}
+    catch(e){if(e&&e.name==='AbortError')throw{code:'cancelled',message:'cancelled'};throw{code:'upstream_error',message:String(e)}}
+    if(!res.ok){throw{code:res.status===401||res.status===403?'not_granted':res.status===429?'rate_limited':res.status===413?'prompt_too_large':'upstream_error',message:'HTTP '+res.status}}
+    let data;try{data=await res.json()}catch(e){throw{code:'upstream_error',message:'bad reply'}}
+    const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    if(!text.trim())throw{code:'empty_completion',message:'empty'};
+    const truncated=data.stop_reason==='max_tokens';
+    if(opts.onText)opts.onText({text,delta:text});
+    return asJson?parseJsonReply(text,truncated):{text,truncated};
+  };
+  const sample=(i,o)=>call(i,o,false);
+  sample.json=(i,o)=>call(i,o,true);
+  sample.limits=async()=>({maxPromptBytes:262144,images:{maxCount:3,maxInputBytes:20*1024*1024,mediaTypes:['image/png','image/jpeg','image/webp','image/gif']}});
+  return sample;
+}
+function cfgHTML(){
+  const c=loadCfg()||{key:'',model:DEFMODEL,endpoint:DEFEND,remember:false};
+  return `<details class="paste" id="aiCfg" ${AI.sample?'':'open'} style="margin-top:12px"><summary>Claude connection (optional${AI.sample?', connected':''})</summary>
+<p class="hint">Add an API key to let Claude draft maps from documents, find ideas and answer questions. Everything else works without it. The key stays in this browser and is sent only to the endpoint below.</p>
+<label class="f"><span>API key</span><input type="password" id="cfgKey" autocomplete="off" placeholder="${c.key?'Saved. Leave blank to keep it.':'sk-ant-…'}"></label>
+<div class="row2"><label class="f"><span>Model</span><input id="cfgModel" value="${esc(c.model)}"></label><label class="f"><span>Endpoint</span><input id="cfgEnd" value="${esc(c.endpoint)}"></label></div>
+<label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cfgRem" ${c.remember?'checked':''}><span style="margin:0;font-weight:400">Remember on this device</span></label>
+<div class="chips"><button type="button" class="btn small primary" data-action="saveCfg">Save connection</button>${c.key||AI.sample?'<button type="button" class="btn small ghost" data-action="rmCfg">Remove</button>':''}</div>
+<div class="aimsg"></div>
+<p class="hint">On a shared or company network, point the endpoint at your own proxy instead of putting a key in each browser.</p></details>`;
+}
+
+/* ---------- downloads ---------- */
+let DL=null;
+const slug=t=>String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,50)||'value-stream-map';
+const EXPCSS='.vsm text{fill:#12202E;font:400 12px "Helvetica Neue",Arial,sans-serif;dominant-baseline:central}.vsm .t{font-weight:600;font-size:13px}.vsm .mut{fill:#566677}.hd{stroke-width:1.5}.hd.va{fill:#D8F0EF;stroke:#0F8B8D}.hd.req{fill:#E1E7F2;stroke:#5E74A0}.hd.waste{fill:#FBE0DD;stroke:#D4483E}.dbox,.nbox{fill:#fff;stroke:#D2DBE3;stroke-width:1.5}.q{fill:#FBEAC5;stroke:#D99A0B;stroke-width:1.5}.q.hot{fill:#D99A0B}.q.none{fill:none;stroke-dasharray:3 3;opacity:.5}.elim{stroke-dasharray:4 3;opacity:.6}.vsm .strike{text-decoration:line-through}.vsm .gain{fill:#1A7440;font-weight:600}.pill{fill:#D8F1E1;stroke:#2A9457;stroke-width:1}.lw{stroke:#D99A0B;stroke-width:3;stroke-linecap:round}.lt{stroke-width:3;stroke-linecap:round}.lt.va{stroke:#0F8B8D}.lt.req{stroke:#5E74A0}.lt.waste{stroke:#D4483E}.lv{stroke:#D2DBE3;stroke-width:1.5}.ar{stroke:#566677;stroke-width:1.5;fill:none}';
+const fixSvg=x=>x.replace(/context-stroke/g,'#566677');
+const CLSS={va:'Adds value',req:'Needed, no value',waste:'Waste'};
+function compositeSVG(){
+  const cur=model(false),fut=model(true),has=S.imps.some(i=>i.on),u=U();
+  const parts=[['Current state',cur]].concat(has?[['Future state',fut]]:[]);
+  const svgs=parts.map(a=>mapSVG(a[1]));
+  const W=Math.max.apply(null,svgs.map(x=>+/ width="(\d+)"/.exec(x)[1]));
+  const mc=metrics(cur),mf=metrics(fut);
+  let y=70,body='';
+  parts.forEach((a,i)=>{body+=`<text x="24" y="${y+8}" style="font-weight:600;font-size:15px">${a[0]}</text><g transform="translate(0,${y+24})">${svgs[i].replace(/^<svg[^>]*>/,'').replace(/<\/svg>$/,'')}</g>`;y+=24+300+20});
+  const sub=has?`Lead time ${fmt(mc.lead)} to ${fmt(mf.lead)} ${u}`:`Lead time ${fmt(mc.lead)} ${u}`;
+  const svg=fixSvg(`<svg xmlns="http://www.w3.org/2000/svg" class="vsm" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}"><style>${EXPCSS}</style><rect width="100%" height="100%" fill="#fff"/><text x="24" y="28" style="font-weight:600;font-size:20px">${esc(S.scope.name||'Value stream map')}</text><text class="mut" x="24" y="52">${esc(sub)}</text>${body}</svg>`);
+  return{svg,w:W,h:y};
+}
+function svgToPng(svg,w,h){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>{const sc=2,c=document.createElement('canvas');c.width=w*sc;c.height=h*sc;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.scale(sc,sc);x.drawImage(img,0,0,w,h);c.toBlob(b=>b?res(b):rej(new Error('png')),'image/png')};
+    img.onerror=()=>rej(new Error('img'));
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  });
+}
+const csvCell=v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+function csvText(){
+  const u=U(),cur=model(false),fut=model(true),has=S.imps.some(i=>i.on);
+  const rows=[['Step','Owner','Value type','Hands-on ('+u+')','Wait before ('+u+')','Right first time (%)','Wait cause','Failure cause'].concat(has?['Future hands-on ('+u+')','Future wait ('+u+')','Future right first time (%)']:[])];
+  cur.steps.forEach((s,i)=>{const f=fut.steps[i];rows.push([s.name,s.owner,CLSS[s.cls],fmt(s.touch),fmt(s.wait),s.yield,s.cause,s.loss].concat(has?[fmt(f.t),fmt(f.w),fmt(f.y)]:[]))});
+  if(S.imps.length){
+    rows.push([]);
+    rows.push(['Improvement','Step','Type','Effort','Included','Cut waiting (%)','Cut hands-on (%)','Right-first-time gain (pts)','Time saved ('+u+')']);
+    S.imps.forEach(i=>{const st=S.steps.find(x=>x.id===i.stepId),sv=fut.sav[i.id];rows.push([i.title,st?st.name:'',i.lever,i.effort,i.on?'Yes':'No',i.waitCut,i.touchCut,i.yieldGain,sv?fmt(sv.days):'0'])});
+  }
+  return '\uFEFF'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
+}
+function reportHTML(){
+  const u=U(),cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),has=S.imps.some(i=>i.on),sc=S.scope;
+  const name=esc(sc.name||'Value stream map');
+  const kp=[['Lead time',mc.lead,mf.lead,v=>fmt(v)+' '+u,-1],['Waiting',mc.wait,mf.wait,v=>fmt(v)+' '+u,-1],['Hands-on time',mc.touch,mf.touch,v=>fmt(v)+' '+u,-1],['Value-add share',mc.pce*100,mf.pce*100,v=>fmt(v)+'%',1],['Right first time, overall',mc.ry*100,mf.ry*100,v=>fmt(v)+'%',1],[cap(sc.input||'inputs')+' needed per '+(sc.output||'output'),mc.inputs,mf.inputs,v=>fmt(v),-1]];
+  const kRows=kp.map(a=>{const d=a[2]-a[1];const ch=has&&Math.abs(d)>1e-9?(d>0?'+':'−')+fmt(Math.abs(d))+(a[4]===1?' pts':''):'';return `<tr><td>${esc(a[0])}</td><td class="n">${a[3](a[1])}</td>${has?`<td class="n">${a[3](a[2])}</td><td class="n ${d*a[4]>0?'g':'b'}">${ch}</td>`:''}</tr>`}).join('');
+  const sRows=cur.steps.map((s,i)=>{const f=fut.steps[i];return `<tr><td>${i+1}</td><td>${esc(s.name||'Untitled step')}</td><td>${esc(s.owner)}</td><td>${CLSS[s.cls]}</td><td class="n">${fmt(s.touch)}</td><td class="n">${fmt(s.wait)}</td><td class="n">${s.yield}%</td><td>${esc(s.cause)}</td>${has?`<td class="n">${fmt(f.t)}</td><td class="n">${fmt(f.w)}</td><td class="n">${fmt(f.y)}%</td>`:''}</tr>`}).join('');
+  const iRows=S.imps.filter(i=>i.on).map(i=>{const st=S.steps.find(x=>x.id===i.stepId),sv=fut.sav[i.id]||{days:0};return `<tr><td>${esc(i.title||'Untitled idea')}</td><td>${esc(st?st.name:'')}</td><td>${esc(i.lever)}</td><td>${esc(i.effort)}</td><td class="n">${fmt(sv.days)} ${u}</td><td class="n">${i.yieldGain>0?'+'+i.yieldGain+' pts':''}</td></tr>`}).join('');
+  const maps=`<h2>Current state</h2><div class="scroll">${fixSvg(mapSVG(cur))}</div>`+(has?`<h2>Future state</h2><div class="scroll">${fixSvg(mapSVG(fut))}</div>`:'');
+  const head=has?`Lead time falls from ${fmt(mc.lead)} to ${fmt(mf.lead)} ${u} (−${fmt(pct(mc.lead-mf.lead,mc.lead))}%).`:`Lead time is ${fmt(mc.lead)} ${u}, and ${fmt(pct(mc.wait,mc.lead))}% of it is waiting.`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title><style>
+body{font:15px/1.5 "Helvetica Neue",Arial,sans-serif;color:#12202E;max-width:1100px;margin:0 auto;padding:32px 24px}
+h1{font-size:28px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 8px}p{margin:0 0 8px}.mut{color:#566677}
+table{border-collapse:collapse;width:100%;font-size:14px;margin-bottom:8px}th,td{border-bottom:1px solid #D2DBE3;padding:6px 8px;text-align:left;vertical-align:top}th{font-weight:600;background:#EBF0F4}
+.n{text-align:right;white-space:nowrap}.g{color:#1A7440}.b{color:#D4483E}
+.scroll{overflow-x:auto}svg{max-width:100%;height:auto}
+@media print{body{padding:0}.scroll{overflow:visible}h2{break-after:avoid}table,svg{break-inside:avoid}}
+</style></head><body>
+<h1>${name}</h1><p class="mut">${esc(sc.account||'')}${sc.account?', ':''}prepared ${esc(new Date().toLocaleDateString())}. Times in ${UN[u]}.</p>
+<p><b>${head}</b></p>
+<h2>Key measures</h2><table><thead><tr><th>Measure</th><th class="n">Current</th>${has?'<th class="n">Future</th><th class="n">Change</th>':''}</tr></thead><tbody>${kRows}</tbody></table>
+${maps}
+<h2>Steps</h2><table><thead><tr><th>#</th><th>Step</th><th>Owner</th><th>Value type</th><th class="n">Hands-on</th><th class="n">Wait before</th><th class="n">Right first time</th><th>Wait cause</th>${has?'<th class="n">Future hands-on</th><th class="n">Future wait</th><th class="n">Future right first time</th>':''}</tr></thead><tbody>${sRows}</tbody></table>
+${iRows?`<h2>Improvements</h2><table><thead><tr><th>Change</th><th>Step</th><th>Type</th><th>Effort</th><th class="n">Time saved</th><th class="n">Quality</th></tr></thead><tbody>${iRows}</tbody></table>`:''}
+${S.docs.length?`<h2>Reference documents</h2><p>${S.docs.map(d=>esc(d.name)).join(', ')}</p>`:''}
+</body></html>`;
+}
+function dlHTML(){
+  if(DL===false)return `<h3>Download</h3><p class="hint" style="margin:0">Downloads aren’t available in this view. Copy the summary at the bottom of the page instead.</p>`;
+  const off=DL?'':'disabled';
+  return `<h3>Download your map</h3><div class="chips" style="margin-top:10px"><button type="button" class="btn primary" data-action="dl" data-v="report" ${off}>Report (.html)</button><button type="button" class="btn" data-action="dl" data-v="png" ${off}>Map image (.png)</button><button type="button" class="btn" data-action="dl" data-v="csv" ${off}>Data (.csv)</button></div><small>The report opens in any browser and prints cleanly to PDF. The CSV opens in Excel.</small><p class="hint" id="dlMsg" role="status"></p>`;
+}
+function renderDl(){const c=$('#dlCard');if(c)c.innerHTML=dlHTML()}
+async function exportFile(kind){
+  const m=$('#dlMsg'),say=t=>{const e=$('#dlMsg');if(e)e.textContent=t};
+  if(!DL)return;
+  try{
+    say('Preparing…');
+    const base=slug(S.scope.name);
+    if(kind==='report')await DL.save({filename:base+'-report.html',data:reportHTML()});
+    else if(kind==='csv')await DL.save({filename:base+'-data.csv',data:csvText()});
+    else{const c=compositeSVG(),blob=await svgToPng(c.svg,c.w,c.h);await DL.save({filename:base+'-map.png',data:blob})}
+    say('Saved.');
+  }catch(e){
+    const c=e&&e.code;
+    say(c==='declined'?'Download cancelled.':c==='too_large'?'That file is too large to save.':'Couldn’t save this file. Try another format.');
+  }
+}
+
+function resultsHTML(){
+  const u=U(),cur=model(false),fut=model(true),mc=metrics(cur),mf=metrics(fut),has=S.imps.some(i=>i.on);
+  const comp=[['wait','Waiting',mc.wait,mf.wait],['va','Adds value',mc.va,mf.va],['req','Needed, no value',mc.req,mf.req],['waste','Waste',mc.waste,mf.waste]];
+  return `<div class="card"><h2>${esc(S.scope.name||'Your value stream')}</h2><p class="lead" style="margin:0">${headline(mc,mf,has)}</p></div>
+<div class="card" id="dlCard">${dlHTML()}</div>
+<div class="kgrid">${kpiCards(mc,mf,has)}</div>
+<section class="card"><h3>Where the time goes</h3>
+<div class="crow"><span>Current</span><div class="ctrack">${bar(cur,mc.lead)}</div><span>${fmt(mc.lead)} ${u}</span></div>
+${has?`<div class="crow"><span>Future</span><div class="ctrack">${bar(fut,mc.lead)}</div><span>${fmt(mf.lead)} ${u}</span></div>`:''}
+<div class="legend" style="margin-top:10px">${comp.map(c=>`<span><i style="background:var(--${c[0]})"></i>${c[1]} ${fmt(pct(c[2],mc.lead))}%${has?' → '+fmt(pct(c[3],mf.lead))+'%':''}</span>`).join('')}</div></section>
+<section class="card"><h3>What each improvement is worth</h3>${waterfall(mc,mf,fut)}</section>
+<section class="card"><h3>Maps</h3><div class="scroll" style="padding:0"><div class="maphead">Current state</div>${mapSVG(cur)}${has?`<div class="maphead">Future state</div>${mapSVG(fut)}`:''}</div></section>
+<section class="card"><h3>Summary to share</h3><textarea id="sumTxt" readonly aria-label="Summary text">${esc(summaryText())}</textarea><div class="copyrow"><button type="button" class="btn primary" data-action="copy" id="copyBtn">Copy summary</button><span class="hint" id="copyMsg" style="margin:0"></span></div></section>
+<div class="nav" style="border:0;margin-top:4px"><button class="btn ghost" data-action="back">Back to improvements</button><span></span></div>`;
+}
+
+function renderPanel(){
+  const p=$('#panel');if(!p)return;
+  p.innerHTML=S.stage===1?p1():S.stage===2?p2():p3();
+  if(S.stage===3)renderStage3Lists();
+  paintMsg();syncAi();
+}
+function renderApp(){
+  app.innerHTML=topHTML()+stagesHTML()+(S.stage===4?`<div id="results">${resultsHTML()}</div>`:`<div class="grid"><section class="panel" id="panel"></section><div id="mapPane"></div></div>`);
+  if(S.stage!==4){renderPanel();renderMapPane()}
+}
+function go(v){
+  if(v>=3&&!S.steps.length)v=2;
+  S.stage=v;REFS_OPEN=null;
+  S.view=v===3&&S.imps.some(i=>i.on)?'future':'current';
+  save();renderApp();
+  try{window.scrollTo({top:0})}catch(e){}
+}
+
+function refreshStage2(){
+  const s=sel();save();
+  const l=$('#stepList');if(l)l.innerHTML=stepRowsHTML();
+  if(s){const cb=$('#causeBlock');if(cb)cb.hidden=!(s.wait>0);const lb=$('#lossBlock');if(lb)lb.hidden=!(s.yield<90);const ins=$('#insight');if(ins)ins.innerHTML=insightHTML(s);document.querySelectorAll('[data-missfor]').forEach(e=>{e.hidden=!(s.missing||[]).includes(e.dataset.missfor)})}
+  renderMapPane();
+}
+
+function onInput(e){
+  const t=e.target,b=t.dataset&&t.dataset.bind;if(!b)return;
+  const parts=b.split('.'),kind=parts[0],key=parts[1];
+  if(kind==='scope'){S.scope[key]=t.value;save();renderMapPane();return}
+  if(kind==='step'){
+    const s=sel();if(!s)return;
+    if(key==='cls'){if(!t.checked)return;s.cls=t.value}
+    else if(key==='touch'||key==='wait')s[key]=num(t.value);
+    else if(key==='yield'){s.yield=Math.max(1,Math.min(100,parseInt(t.value,10)||100));const yv=$('#yv');if(yv)yv.textContent=s.yield+'%'}
+    else s[key]=t.value;
+    if((key==='touch'||key==='wait'||key==='yield')&&s.missing)s.missing=s.missing.filter(k=>k!==key);
+    refreshStage2();return;
+  }
+  if(kind==='imp'){
+    const i=S.imps.find(x=>x.id===t.dataset.id);if(!i)return;
+    if(key==='on')i.on=t.checked;
+    else if(key==='waitCut'||key==='touchCut'||key==='yieldGain')i[key]=+t.value;
+    else if(key==='stepId'){if(i.stepId===t.value)return;i.stepId=t.value;save();renderStage3Lists();return}
+    else i[key]=t.value;
+    save();updateImpLive();
+  }
+}
+app.addEventListener('input',onInput);
+app.addEventListener('change',onInput);
+
+async function copyText(txt){
+  try{await navigator.clipboard.writeText(txt);return true}
+  catch(e){try{const ta=$('#sumTxt');ta.focus();ta.select();return document.execCommand('copy')}catch(e2){return false}}
+}
+app.addEventListener('click',async e=>{
+  const el=e.target.closest('[data-action]');if(!el)return;
+  const a=el.dataset.action,v=el.dataset.v,id=el.dataset.id;
+  switch(a){
+    case 'stage':go(+v);break;
+    case 'next':go(Math.min(4,S.stage+1));break;
+    case 'back':go(Math.max(1,S.stage-1));break;
+    case 'view':S.view=v;save();renderMapPane();break;
+    case 'tpl':loadTpl(v);break;
+    case 'unit':S.scope.unit=v;save();renderPanel();renderMapPane();break;
+    case 'addStep':{const s=newStep();S.steps.push(s);S.sel=s.id;save();renderPanel();renderMapPane();setTimeout(()=>{const f=$('[data-bind="step.name"]');if(f)f.focus()},0);break}
+    case 'selStep':S.sel=id;save();renderPanel();break;
+    case 'up':case 'down':{const i=S.steps.findIndex(s=>s.id===id),j=a==='up'?i-1:i+1;if(i<0||j<0||j>=S.steps.length)break;const t=S.steps[i];S.steps[i]=S.steps[j];S.steps[j]=t;save();renderPanel();renderMapPane();break}
+    case 'delStep':{S.steps=S.steps.filter(s=>s.id!==id);S.imps=S.imps.filter(i=>i.stepId!==id);if(S.sel===id)S.sel=null;ensureSel();save();renderPanel();renderMapPane();break}
+    case 'chip':{const s=sel();if(!s)break;const k=el.dataset.k;s[k]=s[k]===v?'':v;el.parentNode.querySelectorAll('.chip').forEach(c=>{const on=c.dataset.v===s[k];c.classList.toggle('on',on);c.setAttribute('aria-pressed',on)});save();break}
+    case 'addSug':{const g=SUGS[+el.dataset.i];if(!g)break;S.imps.push(newImp({stepId:g.stepId,title:g.title,lever:g.lever,waitCut:g.waitCut,touchCut:g.touchCut,yieldGain:g.yieldGain,effort:g.effort}));save();renderStage3Lists();break}
+    case 'addImp':{if(!S.steps.length)break;S.imps.push(newImp({stepId:S.steps[0].id}));save();renderStage3Lists();setTimeout(()=>{const f=document.querySelectorAll('.imptitle');if(f.length)f[f.length-1].focus()},0);break}
+    case 'delImp':S.imps=S.imps.filter(i=>i.id!==id);save();renderStage3Lists();break;
+    case 'dl':exportFile(v);break;
+    case 'saveCfg':{
+      const key=($('#cfgKey').value||'').trim(),old=loadCfg();
+      const cfg={key:key||(old&&old.key)||'',model:($('#cfgModel').value||'').trim()||DEFMODEL,endpoint:($('#cfgEnd').value||'').trim().replace(/\/+$/,'')||DEFEND,remember:$('#cfgRem').checked};
+      if(!cfg.key&&cfg.endpoint===DEFEND){setMsg('Add an API key to connect.',false,true);break}
+      storeCfg(cfg);AI.sample=makeSample(cfg);AI.imgs=true;setMsg('',false);
+      if(S.stage===2||S.stage===3)renderPanel();else renderRefs();break}
+    case 'rmCfg':{clearCfg();AI.sample=null;AI.imgs=false;DRAFT=null;AISUGS=[];LOOK=null;setMsg('',false);if(S.stage===2||S.stage===3)renderPanel();else renderRefs();break}
+    case 'pick':{const f=$('#fileIn');if(f)f.click();break}
+    case 'addText':{const ta=$('#pasteIn'),t=normText(ta&&ta.value);if(t.length<30){setMsg('Paste at least a few sentences.',false,true);break}S.docs.push({id:uid(),name:'Pasted text '+(S.docs.length+1),kind:'text',status:'ready',err:'',text:t.slice(0,MAXDOC),size:t.length,cut:t.length>MAXDOC});ta.value='';save();renderRefs();break}
+    case 'rmDoc':S.docs=S.docs.filter(d=>d.id!==id);save();renderRefs();break;
+    case 'draftMap':draftMap();break;
+    case 'applyNew':applyDraft('new');break;
+    case 'applyAdd':applyDraft('add');break;
+    case 'discard':DRAFT=null;renderRefs();break;
+    case 'ask':askDocs();break;
+    case 'lookup':lookupStep();break;
+    case 'applyLookup':applyLookup();break;
+    case 'ideas':findIdeas();break;
+    case 'addAiSug':{const g=AISUGS[+el.dataset.i];if(!g)break;S.imps.push(newImp({stepId:g.stepId,title:g.title,lever:g.lever,waitCut:g.waitCut,touchCut:g.touchCut,yieldGain:g.yieldGain,effort:g.effort}));save();renderStage3Lists();break}
+    case 'stop':if(AI.ctl)AI.ctl.abort();break;
+    case 'reset':S.reset=true;renderApp();break;
+    case 'resetNo':S.reset=false;renderApp();break;
+    case 'resetYes':{S=fresh();DRAFT=null;AISUGS=[];LOOK=null;AI.ans='';AI.q='';try{localStorage.removeItem(KEY)}catch(x){}renderApp();break}
+    case 'copy':{const ok=await copyText($('#sumTxt').value),m=$('#copyMsg');if(m){m.textContent=ok?'Copied.':'Couldn’t copy automatically. Select the text and copy it.';setTimeout(()=>{m.textContent=''},2500)}break}
+  }
+});
+
+app.addEventListener('change',e=>{if(e.target&&e.target.id==='fileIn'){addFiles(e.target.files);e.target.value=''}});
+app.addEventListener('input',e=>{if(e.target&&e.target.id==='askIn')AI.q=e.target.value});
+app.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target&&e.target.id==='askIn'){e.preventDefault();askDocs()}});
+app.addEventListener('toggle',e=>{if(e.target&&e.target.id==='refsBox')REFS_OPEN=e.target.open},true);
+app.addEventListener('dragover',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.add('over')}});
+app.addEventListener('dragleave',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d)d.classList.remove('over')});
+app.addEventListener('drop',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.remove('over');if(e.dataTransfer&&e.dataTransfer.files.length)addFiles(e.dataTransfer.files)}});
+
+if(STANDALONE){DL=browserDL;const cfg=loadCfg();if(cfg){AI.sample=makeSample(cfg);AI.imgs=true}}
+renderApp();
+try{
+  if(window.claude&&window.claude.use){
+    window.claude.use('downloads').then(d=>{DL=d||false;renderDl()}).catch(()=>{DL=false;renderDl()});
+    window.claude.use('sample').then(sm=>{
+      if(!sm)return null;
+      AI.sample=sm;
+      return sm.limits?sm.limits().catch(()=>null):null;
+    }).then(l=>{
+      if(!AI.sample)return;
+      AI.imgs=!!(l&&l.images);
+      if(S.stage===2||S.stage===3){if(!AI.busy)renderPanel()}else renderRefs();
+    }).catch(()=>{});
+  }
+}catch(e){if(!DL)DL=false}
+})();
+</script>
+</body>
+</html>
